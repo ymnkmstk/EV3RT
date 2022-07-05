@@ -84,6 +84,7 @@ extern Plotter*     plotter;
    e.g., -D=SPEED_NORM=50, for fine tuning                                  */
 #ifndef SPEED_NORM
 #define SPEED_NORM              45  /* was 50 for 2020 program                 */
+#endif
 #ifndef SPEED_SLOW
 #define SPEED_SLOW              30
 #endif
