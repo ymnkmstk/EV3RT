@@ -663,7 +663,7 @@ void main_task(intptr_t unused) {
             .leaf<ClimbBoard>(_COURSE, 0)
             .composite<BrainTree::ParallelSequence>(1,2)
                 .leaf<IsDistanceEarned>(1200)
-                .leaf<TraceLine>(SPEED_SLOW, GS_TARGET2, P_CONST2, I_CONST2, D_CONST2)
+                .leaf<TraceLine>(SPEED_SLOW, GS_TARGET, P_CONST, I_CONST, D_CONST)
             .end()
         .end()
         .build();
