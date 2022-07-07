@@ -3,9 +3,12 @@
 
     Copyright © 2022 MSAD Mode2P. All rights reserved.
 */
+#include <X11/Xlib.h>
 #include "BrainTree.h"
+#include <opencv2/opencv.hpp>
+using namespace cv;
 /*
-    BrainTree.h must present before ev3api.h on RasPike environment.
+    BrainTree.h and opencv.hpp must present before ev3api.h on RasPike environment.
     Note that ev3api.h is included by app.h.
 */
 #include "app.h"
@@ -15,12 +18,13 @@
 #include <numeric>
 #include <math.h>
 
-
 /* this is to avoid linker error, undefined reference to `__sync_synchronize' */
 extern "C" void __sync_synchronize() {}
 
 /* global variables */
 FILE*           bt;
+VideoCapture    cap;
+Mat             frame;
 Clock*          ev3clock;
 TouchSensor*    touchSensor;
 SonarSensor*    sonarSensor;
@@ -541,6 +545,11 @@ void main_task(intptr_t unused) {
     bt = ev3_serial_open_file(EV3_SERIAL_BT);
     // temp fix 2022/6/20 W.Taniguchi, as Bluetooth not implemented yet
     //assert(bt != NULL);
+    cap = VideoCapture(0);
+    cap.set(CAP_PROP_FRAME_WIDTH,640);
+    cap.set(CAP_PROP_FRAME_HEIGHT,480);
+    cap.set(CAP_PROP_FPS,90);
+    assert(cap.isOpened() == true);    
     /* create and initialize EV3 objects */
     ev3clock    = new Clock();
     touchSensor = new TouchSensor(PORT_1);
@@ -606,10 +615,6 @@ void main_task(intptr_t unused) {
     tr_run = (BrainTree::BehaviorTree*) BrainTree::Builder()
         .composite<BrainTree::ParallelSequence>(1,3)
             .leaf<IsBackOn>()
-            /*
-            ToDo: earned distance is not calculated properly parhaps because the task is NOT invoked every 10ms as defined in app.h on RasPike.
-              Identify a realistic PERIOD_UPD_TSK.  It also impacts PID calculation.
-            */
             .leaf<IsDistanceEarned>(1000)
             .composite<BrainTree::MemSequence>()
                 .leaf<IsColorDetected>(CL_BLACK)
@@ -623,10 +628,10 @@ void main_task(intptr_t unused) {
         .composite<BrainTree::MemSequence>()
             .leaf<StopNow>()
             .leaf<IsTimeEarned>(3000000) // wait 3 seconds
-            .composite<BrainTree::ParallelSequence>(1,3)
-                .leaf<IsTimeEarned>(10000000) // break after 10 seconds
-                .leaf<RunAsInstructed>(-50,-25,0.5)
-            .end()
+            //.composite<BrainTree::ParallelSequence>(1,3)
+            //    .leaf<IsTimeEarned>(10000000) // break after 10 seconds
+            //    .leaf<RunAsInstructed>(-50,-25,0.5)
+            //.end()
             .leaf<StopNow>()
         .end()
         .build();
@@ -645,13 +650,26 @@ void main_task(intptr_t unused) {
     ev3_led_set_color(LED_ORANGE);
     state = ST_CALIBRATION;
 
-    /* the main task sleep until being waken up and let the registered cyclic handler to traverse the behavir trees */
-    _log("going to sleep...");
-    ER ercd = slp_tsk();
-    assert(ercd == E_OK);
-    if (ercd != E_OK) {
-        syslog(LOG_NOTICE, "slp_tsk() returned %d", ercd);
+    /* process video frames until the state gets changed */
+    while (state != ST_END) {
+        Mat frame_org;
+        cap.read(frame_org);
+        if (frame_org.empty() == false) {
+            resize(frame_org, frame, Size(), 0.25, 0.25);
+            _log("invoking imshow...");
+            //_xdisp(imshow("rearCam", frame));
+            _xdisp(waitKey(1));
+        }
+        ev3clock->sleep(10000); // sleep 10 msec
     }
+
+    /* the main task sleep until being waken up and let the registered cyclic handler to traverse the behavir trees */
+    //_log("going to sleep...");
+    //ER ercd = slp_tsk();
+    //assert(ercd == E_OK);
+    //if (ercd != E_OK) {
+    //    syslog(LOG_NOTICE, "slp_tsk() returned %d", ercd);
+    //}
 
     /* deregister cyclic handler from EV3RT */
     stp_cyc(CYC_UPD_TSK);
@@ -672,7 +690,9 @@ void main_task(intptr_t unused) {
     delete sonarSensor;
     delete touchSensor;
     delete ev3clock;
-    _log("being terminated...");
+    /* destroy X11 windows */
+    _xdisp(destroyAllWindows());
+     _log("being terminated...");
     // temp fix 2022/6/20 W.Taniguchi, as Bluetooth not implemented yet
     //fclose(bt);
 #if defined(MAKE_SIM)    
