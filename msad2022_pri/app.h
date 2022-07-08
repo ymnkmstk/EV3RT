@@ -15,8 +15,8 @@ extern "C" {
 #include "target_test.h"
 
 /* task priorities (smaller number has higher priority) */
-#define PRIORITY_UPD_TSK    TMIN_APP_TPRI
-#define PRIORITY_MAIN_TASK  (TMIN_APP_TPRI + 1)
+#define PRIORITY_UPD_TSK    (TMIN_APP_TPRI + 1)
+#define PRIORITY_MAIN_TASK  TMIN_APP_TPRI
 
 /* task periods in micro seconds */
 #define PERIOD_UPD_TSK  (10 * 1000)

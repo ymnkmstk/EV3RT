@@ -3,7 +3,6 @@
 
     Copyright © 2022 MSAD Mode2P. All rights reserved.
 */
-#include <X11/Xlib.h>
 #include "BrainTree.h"
 #include <opencv2/opencv.hpp>
 using namespace cv;
@@ -326,6 +325,114 @@ protected:
 
 /*
     usage:
+    ".leaf<TraceLineCam>(speed, p, i, d, h_min, h_max, s_min, s_max, v_min, v_max, srew_rate)"
+    is to instruct the robot to trace the line in backward at the given speed.
+    p, i, d are constants for PID control.
+    h_min, h_max, s_min, s_max, v_min, v_max are HSV threshold for line recognition binalization.
+    srew_rate = 0.0 indidates NO tropezoidal motion.
+    srew_rate = 0.5 instructs FilteredMotor to change 1 pwm every two executions of update()
+    until the current speed gradually reaches the instructed target speed.
+*/
+class TraceLineCam : public BrainTree::Node {
+public:
+  TraceLineCam(int s, double p, double i, double d, int h_min, int h_max, int s_min, int s_max, int v_min, int v_max, double srew_rate) : speed(s),hmin(h_min),hmax(h_max),smin(s_min),smax(s_max),vmin(v_min),vmax(v_max),srewRate(srew_rate) {
+        updated = false;
+        ltPid = new PIDcalculator(p, i, d, PERIOD_UPD_TSK, -speed, speed);
+    }
+    ~TraceLineCam() {
+        delete ltPid;
+    }
+    Status update() override {
+        if (!updated) {
+            /* The following code chunk is to properly set prevXin in SRLF */
+            srlfL->setRate(0.0);
+            leftMotor->setPWM(leftMotor->getPWM());
+            srlfR->setRate(0.0);
+            rightMotor->setPWM(rightMotor->getPWM());
+            _log("ODO=%05d, Camera Trace run started.", plotter->getDistance());
+            updated = true;
+        }
+
+	Mat img_hsv, img_bin, img_inv;
+	int mx_cnv = 50;
+
+	ER ercd = tloc_mtx(MTX1, 1000U); // test and lock the mutex
+	if (ercd == E_OK) { // if successfully locked, process the frame and unlock the mutex; otherwise, return running
+	  // crop the nearest/bottom part of the image
+	  Mat img_bgr(frame, Rect(0,400,640,80));
+	  ercd = unl_mtx(MTX1);
+	  assert(ercd == E_OK);
+	  // convert the image from BGR to HSV
+	  cvtColor(img_bgr, img_hsv, COLOR_BGR2HSV);
+	  img_bgr.release();
+	} else {
+	  _log("mutex lock failed with %d", ercd);
+	  assert(ercd == E_TMOUT);
+	  return Status::Running;
+	}
+	
+	// binarize the image
+	inRange(img_hsv, Scalar(hmin,smin,vmin), Scalar(hmax,smax,vmax), img_bin);
+	// inverse the image
+	bitwise_not(img_bin, img_inv);
+	// label connected components in the image
+	Mat img_labeled, stats, centroids;
+	loc_cpu(); // disable interrupts
+	int num_labels = connectedComponentsWithStats(img_inv, img_labeled, stats, centroids);
+	unl_cpu(); // enable interrupts
+	
+	// ignore the largest black part (the first label)
+	Mat stats_rest, centroids_rest;
+	for (int i = 1; i < num_labels; i++) {
+	  stats_rest.push_back(stats.row(i));
+	  centroids_rest.push_back(centroids.row(i));
+	}
+	num_labels--;
+
+	if (num_labels >= 1) {
+	  // index = np.argmax(stats[:,4]) in Python
+	  int index = 0, area_largest = 0;
+	  for (int i = 0; i < num_labels; i++) {
+	    if (stats_rest.at<int>(i,4) > area_largest) {
+	      index = i;
+	      area_largest = stats_rest.at<int>(i,4);
+	    }
+	  }
+	  // obtain the attributes of the label
+	  //int x = stats_rest.at<int>(index,0);
+	  //int y = stats_rest.at<int>(index,1);
+	  //int w = stats_rest.at<int>(index,2);
+	  //int h = stats_rest.at<int>(index,3);
+	  //int s = stats_rest.at<int>(index,4);
+	  int mx = centroids_rest.at<double>(index,0);
+	  //int my = centroids_rest.at<double>(index,1);
+	  mx_cnv = int (mx * 100 / 640); // convert scale from 0-640 to 0-100
+	}
+	
+        int8_t backward, turn, pwmL, pwmR;
+
+        /* compute necessary amount of steering by PID control */
+        turn = (-1) * _COURSE * ltPid->compute(mx_cnv, 50); // 50 is the center
+	_log("mx_cnv = %d, turn = %d", mx_cnv, turn);
+        backward = -speed;
+        /* steer EV3 by setting different speed to the motors */
+        pwmL = backward - turn;
+        pwmR = backward + turn;
+        srlfL->setRate(srewRate);
+        leftMotor->setPWM(pwmL);
+        srlfR->setRate(srewRate);
+        rightMotor->setPWM(pwmR);
+        return Status::Running;
+    }
+protected:
+    int speed, hmin, hmax, smin, smax, vmin, vmax;
+    PIDcalculator* ltPid;
+    double srewRate;
+    bool updated;
+};
+
+/*
+    usage:
     ".leaf<TraceLine>(speed, target, p, i, d, srew_rate, trace_side)"
     is to instruct the robot to trace the line at the given speed.
     p, i, d are constants for PID control.
@@ -620,7 +727,7 @@ void main_task(intptr_t unused) {
                 .leaf<IsColorDetected>(CL_BLACK)
                 .leaf<IsColorDetected>(CL_BLUE)
             .end()
-            .leaf<TraceLine>(SPEED_NORM, GS_TARGET, P_CONST, I_CONST, D_CONST, 0.0, TS_NORMAL)
+            .leaf<TraceLineCam>(35, P_CONST, I_CONST, D_CONST, 0, 179, 0, 255, 130, 255, 0.0)
         .end()
         .build();
 
@@ -628,10 +735,7 @@ void main_task(intptr_t unused) {
         .composite<BrainTree::MemSequence>()
             .leaf<StopNow>()
             .leaf<IsTimeEarned>(3000000) // wait 3 seconds
-            //.composite<BrainTree::ParallelSequence>(1,3)
-            //    .leaf<IsTimeEarned>(10000000) // break after 10 seconds
-            //    .leaf<RunAsInstructed>(-50,-25,0.5)
-            //.end()
+            .leaf<TraceLine>(SPEED_NORM, GS_TARGET, P_CONST, I_CONST, D_CONST, 0.0, TS_NORMAL)
             .leaf<StopNow>()
         .end()
         .build();
@@ -642,6 +746,8 @@ void main_task(intptr_t unused) {
     === BEHAVIOR TREE DEFINITION ENDS HERE ===
 */
 
+    /* prepare the first frame */
+    cap.read(frame);
     /* register cyclic handler to EV3RT */
     sta_cyc(CYC_UPD_TSK);
 
@@ -652,15 +758,16 @@ void main_task(intptr_t unused) {
 
     /* process video frames until the state gets changed */
     while (state != ST_END) {
-        Mat frame_org;
-        cap.read(frame_org);
-        if (frame_org.empty() == false) {
-            resize(frame_org, frame, Size(), 0.25, 0.25);
-            _log("invoking imshow...");
-            //_xdisp(imshow("rearCam", frame));
-            _xdisp(waitKey(1));
-        }
-        ev3clock->sleep(10000); // sleep 10 msec
+      ER ercd = tloc_mtx(MTX1, 1000U); // test and lock the mutex
+      if (ercd == E_OK) { // if successfully locked, read a frame and unlock the mutex; otherwise, do nothing
+        cap.read(frame);
+	ercd = unl_mtx(MTX1);
+	assert(ercd == E_OK);
+      } else {
+	_log("mutex lock failed with %d", ercd);
+	assert(ercd == E_TMOUT);
+      }
+      ev3clock->sleep(10000); // sleep 10 msec
     }
 
     /* the main task sleep until being waken up and let the registered cyclic handler to traverse the behavir trees */
@@ -690,8 +797,6 @@ void main_task(intptr_t unused) {
     delete sonarSensor;
     delete touchSensor;
     delete ev3clock;
-    /* destroy X11 windows */
-    _xdisp(destroyAllWindows());
      _log("being terminated...");
     // temp fix 2022/6/20 W.Taniguchi, as Bluetooth not implemented yet
     //fclose(bt);
