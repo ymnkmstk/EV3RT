@@ -359,12 +359,15 @@ public:
 	ER ercd = tloc_mtx(MTX1, 1000U); // test and lock the mutex
 	if (ercd == E_OK) { // if successfully locked, process the frame and unlock the mutex; otherwise, return running
 	  // crop the nearest/bottom part of the image
-	  Mat img_bgr(frame, Rect(0,400,640,80));
+	  //Mat img_bgr(frame, Rect(0,400,640,80));
+	  Mat img_bgr(frame, Rect(0,240,640,240));
 	  ercd = unl_mtx(MTX1);
 	  assert(ercd == E_OK);
 	  // convert the image from BGR to HSV
+	  loc_cpu();
 	  cvtColor(img_bgr, img_hsv, COLOR_BGR2HSV);
-	  img_bgr.release();
+	  unl_cpu();
+	  //img_bgr.release();
 	} else {
 	  _log("mutex lock failed with %d", ercd);
 	  assert(ercd == E_TMOUT);
@@ -727,7 +730,8 @@ void main_task(intptr_t unused) {
                 .leaf<IsColorDetected>(CL_BLACK)
                 .leaf<IsColorDetected>(CL_BLUE)
             .end()
-            .leaf<TraceLineCam>(35, P_CONST, I_CONST, D_CONST, 0, 179, 0, 255, 130, 255, 0.0)
+            .leaf<TraceLineCam>(35, 0.75, 0, 0.2, 0, 179, 0, 255, 130, 255, 0.0)
+      /* P=0.75, I=0.39, D=0.08 */
         .end()
         .build();
 
