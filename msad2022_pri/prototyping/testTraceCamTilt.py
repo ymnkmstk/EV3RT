@@ -24,6 +24,7 @@ cv2.createTrackbar("S_min", "testTrace1", 0, 255, nothing)
 cv2.createTrackbar("S_max", "testTrace1", 255, 255, nothing)
 cv2.createTrackbar("V_min", "testTrace1", 130, 255, nothing)
 cv2.createTrackbar("V_max", "testTrace1", 255, 255, nothing)
+cv2.createTrackbar("Edge",  "testTrace1", 0, 1, nothing)
 
 while True:
     # obtain values from the trackbars
@@ -33,6 +34,7 @@ while True:
     s_max = cv2.getTrackbarPos("S_max", "testTrace1")
     v_min = cv2.getTrackbarPos("V_min", "testTrace1")
     v_max = cv2.getTrackbarPos("V_max", "testTrace1")
+    edge  = cv2.getTrackbarPos("Edge",  "testTrace1")
 
     dx = 320
 
@@ -41,8 +43,10 @@ while True:
     ret, img = cap.read()
     # crop the nearest/bottom part of the image
     img_bgr = img[240:480, 0:640]
+    # reduce the noise
+    img_med = cv2.medianBlur(img_bgr, 5)
     # convert the image from BGR to HSV
-    img_hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
+    img_hsv = cv2.cvtColor(img_med, cv2.COLOR_BGR2HSV)
     # binarize the image
     img_bin = cv2.inRange(img_hsv, (h_min, s_min, v_min), (h_max, s_max, v_max))
     # inverse the image
@@ -51,17 +55,6 @@ while True:
     img_tgt = cv2.bitwise_and(img_hsv, img_hsv, mask=img_inv)
     # label connected components in the image
     num_labels, img_labeled, stats, centroids = cv2.connectedComponentsWithStats(img_inv)
-
-    """
-    for i, row in enumerate(stats):
-        print(f"label {i}")
-        print(f"* topleft: ({row[cv2.CC_STAT_LEFT]}, {row[cv2.CC_STAT_TOP]})")
-        print(f"* size: ({row[cv2.CC_STAT_WIDTH]}, {row[cv2.CC_STAT_HEIGHT]})")
-        print(f"* area: {row[cv2.CC_STAT_AREA]}")
-    print(f"{h_max} >H> {h_min}")
-    print(f"{s_max} >S> {s_min}")
-    print(f"{v_max} >V> {v_min}")
-    """
 
     # ignore the largest black part (the first label)
     num_labels = num_labels - 1
@@ -84,8 +77,8 @@ while True:
         mx = int(centroids[index][0])
         my = int(centroids[index][1])
         dx = 320 - mx
-        # draw the bounding box around the label
-        cv2.rectangle(img_tgt, (x, y), (x+w, y+h), (255,0,255))
+        # draw a circle on the centroid
+        cv2.circle(img_tgt, (mx, my), 20, (179,0,255), -1)
         # paint the largest component in the empty matrix
         img_lbl[img_labeled == index+1, ] = 255
         # detect edges
@@ -94,10 +87,24 @@ while True:
         img_edge_cvt = np.where(img_edge[..., np.newaxis] == 255, (255,255,255), (0,0,0)).astype(np.uint8)
         # find contours
         contours, hierarchy = cv2.findContours(img_edge, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        if contours: # not empty
-            vx,vy,x0,yo = cv2.fitLine(contours[0], cv2.DIST_L2, 0, 0.01, 0.01)
-            if vy != 0: # avoid devide by zero
-                print(f"dx = {dx}, x/y = {vx/vy}")
+        if len(contours) >= 2:
+            vx,vy,x0,y0 = cv2.fitLine(contours[edge], cv2.DIST_L2, 0, 0.01, 0.01)
+            m = 640
+            x1 = int(x0 - m*vx)
+            y1 = int(y0 - m*vy)
+            x2 = int(x0 + m*vx)
+            y2 = int(y0 + m*vy)
+            retval, p1, p2 = cv2.clipLine((0,0,img_tgt.shape[1],img_tgt.shape[0]), (x1,y1), (x2,y2))
+            cv2.line(img_tgt, p1, p2, (179,0,255), 10)
+            # normalize dx from -1000 to 100
+            ndx = int(dx*100/320)
+            # exaggerate the tilt
+            a = -15 # constant
+            if vy != 0:
+                tilt = a*vx*vx/vy/vy
+            else:
+                tilt = 0 # cannot determine the way to go
+            print(f"ndx = {ndx}, tilt = {tilt}")
     
     img_v = cv2.vconcat([img,img_edge_cvt,img_tgt])
     img_comm = cv2.resize(img_v, (int(img_v.shape[1]/4), int(img_v.shape[0]/4)))
