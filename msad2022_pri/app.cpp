@@ -16,7 +16,6 @@ using namespace cv;
 #include <list>
 #include <numeric>
 #include <math.h>
-using namespace std;
 
 #define FRAME_WIDTH  640
 #define FRAME_HEIGHT 480
@@ -329,17 +328,19 @@ protected:
 
 /*
     usage:
-    ".leaf<TraceLineCam>(speed, p, i, d, h_min, h_max, s_min, s_max, v_min, v_max, srew_rate)"
+    ".leaf<TraceLineCam>(speed, p, i, d, h_min, h_max, s_min, s_max, v_min, v_max, srew_rate, trace_side)"
     is to instruct the robot to trace the line in backward at the given speed.
     p, i, d are constants for PID control.
     h_min, h_max, s_min, s_max, v_min, v_max are HSV threshold for line recognition binalization.
     srew_rate = 0.0 indidates NO tropezoidal motion.
     srew_rate = 0.5 instructs FilteredMotor to change 1 pwm every two executions of update()
     until the current speed gradually reaches the instructed target speed.
+    trace_side = TS_NORMAL   when in R(L) course and tracing the right(left) side of the line.
+    trace_side = TS_OPPOSITE when in R(L) course and tracing the left(right) side of the line.
 */
 class TraceLineCam : public BrainTree::Node {
 public:
-  TraceLineCam(int s, double p, double i, double d, int h_min, int h_max, int s_min, int s_max, int v_min, int v_max, double srew_rate) : speed(s),hmin(h_min),hmax(h_max),smin(s_min),smax(s_max),vmin(v_min),vmax(v_max),srewRate(srew_rate) {
+  TraceLineCam(int s, double p, double i, double d, int h_min, int h_max, int s_min, int s_max, int v_min, int v_max, double srew_rate, TraceSide trace_side) : speed(s),hmin(h_min),hmax(h_max),smin(s_min),smax(s_max),vmin(v_min),vmax(v_max),srewRate(srew_rate),side(trace_side) {
         updated = false;
         ltPid = new PIDcalculator(p, i, d, PERIOD_UPD_TSK, -speed, speed);
     }
@@ -358,7 +359,7 @@ public:
         }
 
 	Mat img_bgr, img_med, img_hsv, img_bin, img_inv, img_edge;
-	int dx = FRAME_WIDTH/2;
+	int mx_cnv = 50;
 
 	ER ercd = tloc_mtx(MTX1, 1000U); // test and lock the mutex
 	if (ercd == E_OK) { // if successfully locked, process the frame and unlock the mutex; otherwise, return running
@@ -373,10 +374,10 @@ public:
 	}
 
 	/* reduce the noise */
-	medianBlur(img_bgr, img_med, 5);
+	//medianBlur(img_bgr, img_med, 5);
 	/* convert the image from BGR to HSV */
 	loc_cpu(); /* disable interrupts */
-	cvtColor(img_med, img_hsv, COLOR_BGR2HSV);
+	cvtColor(img_bgr, img_hsv, COLOR_BGR2HSV);
 	unl_cpu(); /* enable interrupts */
 	/* binarize the image */
 	inRange(img_hsv, Scalar(hmin,smin,vmin), Scalar(hmax,smax,vmax), img_bin);
@@ -427,11 +428,15 @@ public:
 	    }
 	  }
 	  /* detect edges */
-	  Canny(img_lbl, img_edge, 255, 255);
+	  loc_cpu(); /* disable interrupts */
+	  Canny(img_lbl, img_edge, 255, 255, 3, false);
+	  unl_cpu(); /* enable interrupts */
 	  /* find contours */
-	  vector<vector<Point>> contours;
-	  vector<Vec4i> hierarchy;
+	  std::vector<std::vector<Point>> contours;
+	  std::vector<Vec4i> hierarchy;
+	  loc_cpu(); /* disable interrupts */
 	  findContours(img_edge, contours, hierarchy, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE);
+	  unl_cpu(); /* enable interrupts */
 	  if (contours.size() >= 2) {
 	    /* derive an approximated line for either edge by regression */
 	    Vec4f lin; /* vx, vy, x0, y0 */
@@ -448,17 +453,15 @@ public:
 	      /* note that mx can be 0- or 640+, depending on p1.x and p2.x */
 	      mx = mx - p1.x + p2.x;
 	    }
-	    dx = (FRAME_WIDTH/2) - mx;
 	  }
+	  mx_cnv = int(mx * 100 / FRAME_WIDTH); /* convert scale from 0-640 to 0-100 */
 	}
-	/* convert scale from 0-640 to 0-100 */
-	int dx_cnv = int (dx * 100 / FRAME_WIDTH);
 	
         int8_t backward, turn, pwmL, pwmR;
 
         /* compute necessary amount of steering by PID control */
-        turn = (-1) * _COURSE * ltPid->compute(dx_cnv, 50); // 50 is the center
-	_log("dx_cnv = %d, turn = %d", dx_cnv, turn);
+        turn = (-1) * _COURSE * ltPid->compute(mx_cnv, 50); /* 50 is the center */
+	_log("mx_cnv = %d, turn = %d", mx_cnv, turn);
         backward = -speed;
         /* steer EV3 by setting different speed to the motors */
         pwmL = backward - turn;
@@ -473,6 +476,7 @@ protected:
     int speed, hmin, hmax, smin, smax, vmin, vmax;
     PIDcalculator* ltPid;
     double srewRate;
+    TraceSide side;
     bool updated;
 };
 
@@ -772,8 +776,8 @@ void main_task(intptr_t unused) {
                 .leaf<IsColorDetected>(CL_BLACK)
                 .leaf<IsColorDetected>(CL_BLUE)
             .end()
-            .leaf<TraceLineCam>(35, 0.75, 0, 0.2, 0, 179, 0, 255, 130, 255, 0.0)
-      /* P=0.75, I=0.39, D=0.08 */
+        .leaf<TraceLineCam>(35, P_CONST, I_CONST, D_CONST, 0, 179, 0, 255, 130, 255, 0.0, TS_NORMAL)
+        /* P=0.75, I=0.39, D=0.08 */
         .end()
         .build();
 
