@@ -440,7 +440,7 @@ public:
 	  if (contours.size() >= 2) {
 	    /* derive an approximated line for either edge by regression */
 	    Vec4f lin; /* vx, vy, x0, y0 */
-	    fitLine(contours[0], lin, DIST_L2, 0, 0.01, 0.01);
+	    fitLine(contours[side], lin, DIST_L2, 0, 0.01, 0.01);
 	    float m = FRAME_WIDTH;
 	    Point p1,p2;
 	    p1.x = (int)(lin[2] - m*lin[0]);
@@ -450,8 +450,11 @@ public:
 	    clipLine(Rect(0,0,img_edge.size().width,img_edge.size().height), p1, p2);
 	    /* adjust the centroid by the line tilt */
 	    if (lin[1] != 0) {
-	      /* note that mx can be 0- or 640+, depending on p1.x and p2.x */
-	      mx = mx - p1.x + p2.x;
+	      if (p1.y < p2.y) {
+		mx = mx + 1.0*(p1.x - p2.x);
+	      } else if (p1.y > p2.y) {
+		mx = mx + 1.0*(p2.x - p1.x);
+	      } /* note that mx can be 0- or 640+, depending on p1.x and p2.x */
 	    }
 	  }
 	  mx_cnv = int(mx * 100 / FRAME_WIDTH); /* convert scale from 0-640 to 0-100 */
@@ -467,9 +470,9 @@ public:
         pwmL = backward - turn;
         pwmR = backward + turn;
         srlfL->setRate(srewRate);
-        //leftMotor->setPWM(pwmL);
+        leftMotor->setPWM(pwmL);
         srlfR->setRate(srewRate);
-        //rightMotor->setPWM(pwmR);
+        rightMotor->setPWM(pwmR);
         return Status::Running;
     }
 protected:
@@ -776,7 +779,8 @@ void main_task(intptr_t unused) {
                 .leaf<IsColorDetected>(CL_BLACK)
                 .leaf<IsColorDetected>(CL_BLUE)
             .end()
-        .leaf<TraceLineCam>(35, P_CONST, I_CONST, D_CONST, 0, 179, 0, 255, 130, 255, 0.0, TS_NORMAL)
+        .leaf<TraceLineCam>(35, 0.1, 0.39, D_CONST, 0, 179, 0, 255, 130, 255, 0.0, TS_NORMAL)
+      /* P=0.1 */
         /* P=0.75, I=0.39, D=0.08 */
         .end()
         .build();
