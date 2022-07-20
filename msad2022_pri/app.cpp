@@ -642,16 +642,16 @@ void main_task(intptr_t unused) {
 
 #else /* BEHAVIOR FOR THE LEFT COURSE STARTS HERE */
     tr_run = (BrainTree::BehaviorTree*) BrainTree::Builder()
- //       .composite<BrainTree::ParallelSequence>(1,2)
- //           .leaf<SetArmPosition>(-20, -50)
- //       .end()
         .composite<BrainTree::ParallelSequence>(1,2)
             .leaf<IsBackOn>()
             /*
-            ToDo: earned distance is not calculated properly parhaps because the task is NOT invoked every 10ms as defined in app.h on RasPike.
-              Identify a realistic PERIOD_UPD_TSK.  It also impacts PID calculation.
+            ToDo: earned distance is not calculated properly 
+parhaps because the task is NOT invoked every 10ms as defined in 
+app.h on RasPike.
+              Identify a realistic PERIOD_UPD_TSK.  It also impacts
+PID calculation.
             */
-            .leaf<IsDistanceEarned>(100)
+            .leaf<IsDistanceEarned>(10)
             .composite<BrainTree::MemSequence>()
                 .leaf<IsColorDetected>(CL_BLACK)
                 .leaf<IsColorDetected>(CL_BLUE)
@@ -664,22 +664,35 @@ void main_task(intptr_t unused) {
         .composite<BrainTree::ParallelSequence>(1,2)
             .leaf<IsBackOn>()
             .composite<BrainTree::MemSequence>()
-//                .leaf<SetArmPosition>(0, -50)
                 .composite<BrainTree::ParallelSequence>(1,2)
-                        .leaf<IsDistanceEarned>(10)
-                        .leaf<IsColorDetected>(CL_BLUE)
-                        .leaf<TraceLine>(SPEED_NORM, GS_TARGET, P_CONST, I_CONST, D_CONST, 0.0, TS_NORMAL)
+                    .leaf<IsDistanceEarned>(30)
+                    .leaf<RunAsInstructed>(70, 0, 0.0)
                 .end()
                 .composite<BrainTree::ParallelSequence>(1,2)
-                    .leaf<IsTimeEarned>(300000)
-                    .leaf<TraceLine>(SPEED_NORM, GS_TARGET, P_CONST, I_CONST, D_CONST, 0.0, TS_NORMAL)
+                    .leaf<IsDistanceEarned>(85)
+                    .leaf<RunAsInstructed>(0, 70, 0.0)
                 .end()
                 .composite<BrainTree::ParallelSequence>(1,2)
-                    .leaf<IsTimeEarned>(1500000)
-                    .leaf<TraceLine>(SPEED_SLOW, GS_TARGET, P_CONST, I_CONST, D_CONST, 0.0, TS_NORMAL)
+                    .leaf<IsDistanceEarned>(280)
+                    .leaf<RunAsInstructed>(50, 20, 0.0)
                 .end()
                 .composite<BrainTree::ParallelSequence>(1,2)
-                    .leaf<IsDistanceEarned>(120)
+                    .leaf<IsDistanceEarned>(280)
+                    .leaf<RunAsInstructed>(20, 60, 0.0)
+                .end()
+                .composite<BrainTree::ParallelSequence>(1,2)
+                    .leaf<IsDistanceEarned>(252)
+                    .leaf<RunAsInstructed>(50, 20, 0.0)
+                .end()
+                .composite<BrainTree::ParallelSequence>(1,2)
+                    .leaf<IsDistanceEarned>(253)
+                    .leaf<RunAsInstructed>(20, 50, 0.0)
+                .end()
+                .composite<BrainTree::ParallelSequence>(1,2)
+                    .leaf<RunAsInstructed>(0, 0, 0.0)
+                .end()
+                .composite<BrainTree::ParallelSequence>(1,2)
+                    .leaf<IsDistanceEarned>(130)
                     .leaf<RunAsInstructed>(15, 35, 0.0)
                 .end()
                 .composite<BrainTree::ParallelSequence>(1,2)
@@ -885,3 +898,5 @@ void update_task(intptr_t unused) {
 
     //logger->outputLog(LOG_INTERVAL);
 }
+
+
