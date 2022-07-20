@@ -40,17 +40,15 @@ while True:
     v_max = cv2.getTrackbarPos("V_max", "testTrace1")
     edge  = cv2.getTrackbarPos("Edge",  "testTrace1")
 
-    dx = int(FRAME_WIDTH/2)
+    mx = int(FRAME_WIDTH/2)
 
     time.sleep(0.01)
 
     ret, img = cap.read()
     # crop the nearest/bottom part of the image
     img_bgr = img[int(FRAME_HEIGHT/2):FRAME_HEIGHT, 0:FRAME_WIDTH]
-    # reduce the noise
-    img_med = cv2.medianBlur(img_bgr, 5)
     # convert the image from BGR to HSV
-    img_hsv = cv2.cvtColor(img_med, cv2.COLOR_BGR2HSV)
+    img_hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
     # binarize the image
     img_bin = cv2.inRange(img_hsv, (h_min, s_min, v_min), (h_max, s_max, v_max))
     # inverse the image
@@ -103,11 +101,14 @@ while True:
             cv2.line(img_tgt, p1, p2, (179,0,255), 10)
             # adjust the centroid by the line tilt
             if vy != 0:
-                mx = mx - p1[0] + p2[0]
+                if p1[1] < p2[1]:
+                    mx = mx + p1[0] - p2[0]
+                elif p1[1] > p2[1]:
+                    mx = mx - p1[0] + p2[0]
             # indicate the adjusted centroid by the vertical line
             cv2.line(img_tgt, (mx, 0), (mx, int(FRAME_HEIGHT/2)), (179,0,255), 10)
-            dx = int(FRAME_WIDTH/2) - mx
-            print(f"dx = {dx}")
+            
+        print(f"mx = {mx}")
 
     # concatinate the images - original + edge + target
     img_v = cv2.vconcat([img,img_edge_cvt,img_tgt])
