@@ -16,6 +16,10 @@ using namespace cv;
 #include <list>
 #include <numeric>
 #include <math.h>
+using namespace std;
+
+#define FRAME_WIDTH  640
+#define FRAME_HEIGHT 480
 
 /* this is to avoid linker error, undefined reference to `__sync_synchronize' */
 extern "C" void __sync_synchronize() {}
@@ -353,38 +357,38 @@ public:
             updated = true;
         }
 
-	Mat img_hsv, img_bin, img_inv;
-	int mx_cnv = 50;
+	Mat img_bgr, img_med, img_hsv, img_bin, img_inv, img_edge;
+	int dx = FRAME_WIDTH/2;
 
 	ER ercd = tloc_mtx(MTX1, 1000U); // test and lock the mutex
 	if (ercd == E_OK) { // if successfully locked, process the frame and unlock the mutex; otherwise, return running
-	  // crop the nearest/bottom part of the image
-	  //Mat img_bgr(frame, Rect(0,400,640,80));
-	  Mat img_bgr(frame, Rect(0,240,640,240));
+	  /* crop the nearest/bottom part of the image */
+	  img_bgr = Mat(frame, Rect(0,FRAME_HEIGHT/2,FRAME_WIDTH,FRAME_HEIGHT/2));
 	  ercd = unl_mtx(MTX1);
 	  assert(ercd == E_OK);
-	  // convert the image from BGR to HSV
-	  loc_cpu();
-	  cvtColor(img_bgr, img_hsv, COLOR_BGR2HSV);
-	  unl_cpu();
-	  //img_bgr.release();
 	} else {
 	  _log("mutex lock failed with %d", ercd);
 	  assert(ercd == E_TMOUT);
 	  return Status::Running;
 	}
-	
-	// binarize the image
+
+	/* reduce the noise */
+	medianBlur(img_bgr, img_med, 5);
+	/* convert the image from BGR to HSV */
+	loc_cpu(); /* disable interrupts */
+	cvtColor(img_med, img_hsv, COLOR_BGR2HSV);
+	unl_cpu(); /* enable interrupts */
+	/* binarize the image */
 	inRange(img_hsv, Scalar(hmin,smin,vmin), Scalar(hmax,smax,vmax), img_bin);
-	// inverse the image
+	/* inverse the image */
 	bitwise_not(img_bin, img_inv);
-	// label connected components in the image
+	/* label connected components in the image */
 	Mat img_labeled, stats, centroids;
-	loc_cpu(); // disable interrupts
+	loc_cpu(); /* disable interrupts */
 	int num_labels = connectedComponentsWithStats(img_inv, img_labeled, stats, centroids);
-	unl_cpu(); // enable interrupts
+	unl_cpu(); /* enable interrupts */
 	
-	// ignore the largest black part (the first label)
+	/* ignore the largest black part (the first label) */
 	Mat stats_rest, centroids_rest;
 	for (int i = 1; i < num_labels; i++) {
 	  stats_rest.push_back(stats.row(i));
@@ -392,8 +396,13 @@ public:
 	}
 	num_labels--;
 
+	/* prepare an empty matrix */
+	Mat img_lbl = Mat::zeros(img_bin.size(), CV_8UC1);
+
 	if (num_labels >= 1) {
-	  // index = np.argmax(stats[:,4]) in Python
+	  /* obtain the index to the label which has the largest area,
+	     corresponding to
+	     index = np.argmax(stats[:,4]) in Python */
 	  int index = 0, area_largest = 0;
 	  for (int i = 0; i < num_labels; i++) {
 	    if (stats_rest.at<int>(i,4) > area_largest) {
@@ -401,7 +410,7 @@ public:
 	      area_largest = stats_rest.at<int>(i,4);
 	    }
 	  }
-	  // obtain the attributes of the label
+	  /* obtain the attributes of the label */
 	  //int x = stats_rest.at<int>(index,0);
 	  //int y = stats_rest.at<int>(index,1);
 	  //int w = stats_rest.at<int>(index,2);
@@ -409,22 +418,55 @@ public:
 	  //int s = stats_rest.at<int>(index,4);
 	  int mx = centroids_rest.at<double>(index,0);
 	  //int my = centroids_rest.at<double>(index,1);
-	  mx_cnv = int (mx * 100 / 640); // convert scale from 0-640 to 0-100
+	  /* copy the largest component in the empty matrix */
+	  for (int i = 0; i < img_labeled.size().height; i++) {
+	    for (int j = 0; j < img_labeled.size().width; j++) {
+	      if (img_labeled.at<int>(i,j) == index+1) { /* type = CV_32S */
+		img_lbl.at<uchar>(i,j) = 255; /* type = CV_8U */
+	      }
+	    }
+	  }
+	  /* detect edges */
+	  Canny(img_lbl, img_edge, 255, 255);
+	  /* find contours */
+	  vector<vector<Point>> contours;
+	  vector<Vec4i> hierarchy;
+	  findContours(img_edge, contours, hierarchy, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE);
+	  if (contours.size() >= 2) {
+	    /* derive an approximated line for either edge by regression */
+	    Vec4f lin; /* vx, vy, x0, y0 */
+	    fitLine(contours[0], lin, DIST_L2, 0, 0.01, 0.01);
+	    float m = FRAME_WIDTH;
+	    Point p1,p2;
+	    p1.x = (int)(lin[2] - m*lin[0]);
+	    p1.y = (int)(lin[3] - m*lin[1]);
+	    p2.x = (int)(lin[2] + m*lin[0]);
+	    p2.y = (int)(lin[3] + m*lin[1]);
+	    clipLine(Rect(0,0,img_edge.size().width,img_edge.size().height), p1, p2);
+	    /* adjust the centroid by the line tilt */
+	    if (lin[1] != 0) {
+	      /* note that mx can be 0- or 640+, depending on p1.x and p2.x */
+	      mx = mx - p1.x + p2.x;
+	    }
+	    dx = (FRAME_WIDTH/2) - mx;
+	  }
 	}
+	/* convert scale from 0-640 to 0-100 */
+	int dx_cnv = int (dx * 100 / FRAME_WIDTH);
 	
         int8_t backward, turn, pwmL, pwmR;
 
         /* compute necessary amount of steering by PID control */
-        turn = (-1) * _COURSE * ltPid->compute(mx_cnv, 50); // 50 is the center
-	_log("mx_cnv = %d, turn = %d", mx_cnv, turn);
+        turn = (-1) * _COURSE * ltPid->compute(dx_cnv, 50); // 50 is the center
+	_log("dx_cnv = %d, turn = %d", dx_cnv, turn);
         backward = -speed;
         /* steer EV3 by setting different speed to the motors */
         pwmL = backward - turn;
         pwmR = backward + turn;
         srlfL->setRate(srewRate);
-        leftMotor->setPWM(pwmL);
+        //leftMotor->setPWM(pwmL);
         srlfR->setRate(srewRate);
-        rightMotor->setPWM(pwmR);
+        //rightMotor->setPWM(pwmR);
         return Status::Running;
     }
 protected:
@@ -656,9 +698,9 @@ void main_task(intptr_t unused) {
     // temp fix 2022/6/20 W.Taniguchi, as Bluetooth not implemented yet
     //assert(bt != NULL);
     cap = VideoCapture(0);
-    cap.set(CAP_PROP_FRAME_WIDTH,640);
-    cap.set(CAP_PROP_FRAME_HEIGHT,480);
-    cap.set(CAP_PROP_FPS,90);
+    cap.set(CAP_PROP_FRAME_WIDTH, FRAME_WIDTH);
+    cap.set(CAP_PROP_FRAME_HEIGHT, FRAME_HEIGHT);
+    cap.set(CAP_PROP_FPS, 90);
     assert(cap.isOpened() == true);    
     /* create and initialize EV3 objects */
     ev3clock    = new Clock();
@@ -750,7 +792,7 @@ void main_task(intptr_t unused) {
     === BEHAVIOR TREE DEFINITION ENDS HERE ===
 */
 
-    /* prepare the first frame */
+    /* prepare a frame for the first frame */
     cap.read(frame);
     /* register cyclic handler to EV3RT */
     sta_cyc(CYC_UPD_TSK);
@@ -801,6 +843,7 @@ void main_task(intptr_t unused) {
     delete sonarSensor;
     delete touchSensor;
     delete ev3clock;
+    cap.release();
      _log("being terminated...");
     // temp fix 2022/6/20 W.Taniguchi, as Bluetooth not implemented yet
     //fclose(bt);
