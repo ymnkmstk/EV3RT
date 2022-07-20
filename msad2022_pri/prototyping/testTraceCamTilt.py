@@ -99,8 +99,7 @@ while True:
             x2 = int(x0 + m*vx)
             y2 = int(y0 + m*vy)
             retval, p1, p2 = cv2.clipLine((0,0,img_tgt.shape[1],img_tgt.shape[0]), (x1,y1), (x2,y2))
-            # draw the line
-            #print(mx, p1, p2)
+            # draw the line on the target image
             cv2.line(img_tgt, p1, p2, (179,0,255), 10)
             # adjust the centroid by the line tilt
             if vy != 0:
@@ -108,7 +107,7 @@ while True:
             # indicate the adjusted centroid by the vertical line
             cv2.line(img_tgt, (mx, 0), (mx, int(FRAME_HEIGHT/2)), (179,0,255), 10)
             dx = int(FRAME_WIDTH/2) - mx
-            #print(f"dx = {dx}")
+            print(f"dx = {dx}")
 
     # concatinate the images - original + edge + target
     img_v = cv2.vconcat([img,img_edge_cvt,img_tgt])
