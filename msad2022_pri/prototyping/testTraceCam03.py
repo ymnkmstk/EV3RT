@@ -29,14 +29,14 @@ cv2.createTrackbar("Edge",  "testTrace1", 0, 2, nothing)
 
 # initial region of interest
 roi = (0, 0, FRAME_WIDTH, FRAME_HEIGHT)
+# initial trace target
+mx = int(FRAME_WIDTH/2)
 
 while True:
     # obtain values from the trackbars
     gs_min = cv2.getTrackbarPos("GS_min", "testTrace1")
     gs_max = cv2.getTrackbarPos("GS_max", "testTrace1")
     edge  = cv2.getTrackbarPos("Edge",  "testTrace1")
-
-    mx = int(FRAME_WIDTH/2)
 
     time.sleep(0.01)
 
@@ -110,7 +110,9 @@ while True:
     cv2.rectangle(img_orig, (x,y), (x+w,y+h), (255,0,0), 10)
     # draw the trace target on the image
     cv2.circle(img_orig, (mx, FRAME_HEIGHT-10), 20, (0,0,255), -1)
-    print(f"mx = {mx}")
+    # approximate the delta in rotation (z-axis) 
+    dx = (mx - int(FRAME_WIDTH/2)) / int(FRAME_WIDTH/2)
+    print(f"mx = {mx}, dx = {dx}")
 
     # shrink the image to avoid delay in transmission
     img_comm = cv2.resize(img_orig, (int(img_orig.shape[1]/4), int(img_orig.shape[0]/4)))
