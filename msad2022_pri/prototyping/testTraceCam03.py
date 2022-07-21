@@ -25,7 +25,7 @@ cv2.namedWindow("testTrace1")
 
 cv2.createTrackbar("GS_min", "testTrace1", 0, 255, nothing)
 cv2.createTrackbar("GS_max", "testTrace1", 100, 255, nothing)
-cv2.createTrackbar("Edge",  "testTrace1", 0, 1, nothing)
+cv2.createTrackbar("Edge",  "testTrace1", 0, 2, nothing)
 
 # initial region of interest
 roi = (0, 0, FRAME_WIDTH, FRAME_HEIGHT)
@@ -70,6 +70,7 @@ while True:
                 i_area_max = i
         # draw the largest contour on the original image
         img_orig = cv2.drawContours(img_orig, [contours[i_area_max]], 0, (0,255,0), 10)
+
         # calculate the bounding box around the largest contour 
         x, y, w, h = cv2.boundingRect(contours[i_area_max])
         # adjust the region of interest
@@ -85,9 +86,24 @@ while True:
             w = FRAME_WIDTH - x
         if y + h > FRAME_HEIGHT:
             h = FRAME_HEIGHT - y
+        # set the new region of interest
         roi = (x, y, w, h)
-        # calculate the center of the line
-
+        
+        # prepare for trace target calculation
+        img_cnt = np.zeros_like(img_orig)
+        img_cnt = cv2.drawContours(img_cnt, [contours[i_area_max]], 0, (0,255,0), 1)
+        img_cnt_gray = cv2.cvtColor(img_cnt, cv2.COLOR_BGR2GRAY)
+        # scan the line really close to the image bottom to find edges
+        scan_line = img_cnt_gray[img_cnt_gray.shape[0] - 10]
+        edges = np.flatnonzero(scan_line)
+        # calculate the trace target using the edges
+        if len(edges) >= 2:
+            if edge != 2:
+                mx = edges[edge]
+            else:
+                mx = int((edges[0]+edges[1]) / 2)
+        elif len(edges) == 1:
+            mx = edges[0]
 
     # draw the area of interest on the original image
     x, y, w, h = roi
