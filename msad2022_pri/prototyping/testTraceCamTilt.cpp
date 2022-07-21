@@ -49,18 +49,16 @@ int main() {
     vmax = getTrackbarPos("V_max", "testTrace1");
     edge = getTrackbarPos("Edge",  "testTrace1");
 
-    Mat img, img_med, img_hsv, img_bin, img_inv, img_tgt, img_edge, img_comm;
-    int dx = FRAME_WIDTH/2, c;
+    Mat img, img_bgr, img_hsv, img_bin, img_inv, img_tgt, img_edge, img_comm;
+    int mx = FRAME_WIDTH/2, c;
 
     sleep_for(chrono::milliseconds(10));
 
     cap.read(img);
     /* crop the nearest/bottom part of the image */
-    Mat img_bgr(img, Rect(0,FRAME_HEIGHT/2,FRAME_WIDTH,FRAME_HEIGHT/2));
-    /* reduce the noise */
-    medianBlur(img_bgr, img_med, 5);
+    img_bgr = Mat(img, Rect(0,FRAME_HEIGHT/2,FRAME_WIDTH,FRAME_HEIGHT/2));
     /* convert the image from BGR to HSV */
-    cvtColor(img_med, img_hsv, COLOR_BGR2HSV);
+    cvtColor(img_bgr, img_hsv, COLOR_BGR2HSV);
     /* binarize the image */
     inRange(img_hsv, Scalar(hmin,smin,vmin), Scalar(hmax,smax,vmax), img_bin);
     /* inverse the image */
@@ -100,7 +98,7 @@ int main() {
       int w = stats_rest.at<int>(index,2);
       int h = stats_rest.at<int>(index,3);
       int s = stats_rest.at<int>(index,4);
-      int mx = centroids_rest.at<double>(index,0);
+      mx = centroids_rest.at<double>(index,0);
       int my = centroids_rest.at<double>(index,1);
       /* draw a circle at the centroid on the target image */
       circle(img_tgt, Point(mx, my), 20, Scalar(179,0,255), -1);
@@ -137,13 +135,16 @@ int main() {
 	line(img_tgt, p1, p2, Scalar(179,0,255), 10, LINE_4);
 	/* adjust the centroid by the line tilt */
 	if (lin[1] != 0) {
-	  mx = mx - p1.x + p2.x;
+	  if (p1.y < p2.y) {
+	    mx = mx + p1.x - p2.x;
+	  } else if (p1.y > p2.y) {
+	    mx = mx - p1.x + p2.x;
+	  }
 	}
 	/* indicate the adjusted centroid by the vertical line */
 	line(img_tgt, Point(mx,0), Point(mx,FRAME_HEIGHT/2), Scalar(179,0,255), 10, LINE_4);
-	dx = (FRAME_WIDTH/2) - mx;
-	cout << "dx = " << dx << endl;
       }
+      cout << "mx = " << mx << endl;
     }
 
     /* concatinate the images - original + edge + target */
