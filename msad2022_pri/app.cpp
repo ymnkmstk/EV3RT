@@ -651,7 +651,7 @@ app.h on RasPike.
               Identify a realistic PERIOD_UPD_TSK.  It also impacts
 PID calculation.
             */
-            .leaf<IsDistanceEarned>(10)
+            .leaf<IsDistanceEarned>(10000)
             .composite<BrainTree::MemSequence>()
                 .leaf<IsColorDetected>(CL_BLACK)
                 .leaf<IsColorDetected>(CL_BLUE)
