@@ -645,18 +645,15 @@ void main_task(intptr_t unused) {
         .composite<BrainTree::ParallelSequence>(1,2)
             .leaf<IsBackOn>()
             /*
-            ToDo: earned distance is not calculated properly 
-parhaps because the task is NOT invoked every 10ms as defined in 
+            ToDo: earned distance is not calculated properly parhaps because the task is NOT invoked every 10ms as defined in 
 app.h on RasPike.
-              Identify a realistic PERIOD_UPD_TSK.  It also impacts
-PID calculation.
+              Identify a realistic PERIOD_UPD_TSK.  It also impacts PID calculation.
             */
             .leaf<IsDistanceEarned>(4000)
             .composite<BrainTree::MemSequence>()
-                .leaf<IsColorDetected>(CL_BLACK)
                 .leaf<IsColorDetected>(CL_BLUE)
             .end()
-            .leaf<TraceLine>(SPEED_NORM, GS_TARGET, P_CONST, I_CONST, D_CONST, 0.0, TS_NORMAL)
+//            .leaf<TraceLine>(SPEED_NORM, GS_TARGET, P_CONST, I_CONST, D_CONST, 0.0, TS_NORMAL)
         .end()
     .build();
 
@@ -787,8 +784,11 @@ void update_task(intptr_t unused) {
     ER ercd;
 
     colorSensor->sense();
+    rgb_raw_t cur_rgb;
+    colorSensor->getRawColor(cur_rgb);
+    _log("r=%d g=%d b=%d",cur_rgb.r,cur_rgb.g,cur_rgb.b);
     plotter->plot();
-
+    
 /*
     === STATE MACHINE DEFINITION STARTS HERE ===
     The robot behavior is defined using HFSM (Hierarchical Finite State Machine) with two hierarchies as a whole where:
