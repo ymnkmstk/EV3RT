@@ -1,6 +1,5 @@
 /*
     app.cpp
-
     Copyright © 2022 MSAD Mode2P. All rights reserved.
 */
 #include "BrainTree.h"
@@ -629,7 +628,6 @@ void main_task(intptr_t unused) {
 /*
     DEFINE ROBOT BEHAVIOR AFTER START
     FOR THE RIGHT AND LEFT COURSE SEPARATELY
-
     #if defined(MAKE_RIGHT)
     #else
     #endif
@@ -644,49 +642,76 @@ void main_task(intptr_t unused) {
     tr_run = (BrainTree::BehaviorTree*) BrainTree::Builder()
         .composite<BrainTree::ParallelSequence>(1,2)
             .leaf<IsBackOn>()
-            /*
-            ToDo: earned distance is not calculated properly 
-parhaps because the task is NOT invoked every 10ms as defined in 
-app.h on RasPike.
-              Identify a realistic PERIOD_UPD_TSK.  It also impacts
-PID calculation.
-            */
-            .leaf<IsDistanceEarned>(10000)
+/*
+    ToDo: earned distance is not calculated properly parhaps because the task is NOT invoked every 10ms as defined in app.h on RasPike.
+    dentify a realistic PERIOD_UPD_TSK.  It also impacts PID calculation.
+*/
+            .leaf<IsDistanceEarned>(400)
             .composite<BrainTree::MemSequence>()
                 .leaf<IsColorDetected>(CL_BLACK)
                 .leaf<IsColorDetected>(CL_BLUE)
             .end()
-            .leaf<TraceLine>(SPEED_NORM, GS_TARGET, P_CONST, I_CONST, D_CONST, 0.0, TS_NORMAL)
+            .leaf<TraceLine>(40, GS_TARGET, P_CONST, I_CONST, D_CONST, 0.0, TS_OPPOSITE)
         .end()
     .build();
-
     tr_slalom = (BrainTree::BehaviorTree*) BrainTree::Builder()
         .composite<BrainTree::ParallelSequence>(1,2)
             .leaf<IsBackOn>()
             .composite<BrainTree::MemSequence>()
+            /*
                 .composite<BrainTree::ParallelSequence>(1,2)
-                    .leaf<IsDistanceEarned>(30)
-                    .leaf<RunAsInstructed>(70, 0, 0.0)
+                    .leaf<IsTimeEarned>(1000000) // wait 1 seconds
+                    .leaf<RunAsInstructed>(0, 0, 0.0)
                 .end()
-                .composite<BrainTree::ParallelSequence>(1,2)
-                    .leaf<IsDistanceEarned>(85)
-                    .leaf<RunAsInstructed>(0, 70, 0.0)
+            */
+                .composite<BrainTree::ParallelSequence>(1,2)//初期位置調整のために、台上で短距離ライントレース
+                    .leaf<IsDistanceEarned>(10)
+                    .leaf<TraceLine>(30, GS_TARGET, P_CONST, I_CONST, D_CONST, 0.0, TS_OPPOSITE)
+                    //.leaf<RunAsInstructed>(30, 30, 0.0)
                 .end()
-                .composite<BrainTree::ParallelSequence>(1,2)
-                    .leaf<IsDistanceEarned>(280)
-                    .leaf<RunAsInstructed>(50, 20, 0.0)
-                .end()
-                .composite<BrainTree::ParallelSequence>(1,2)
-                    .leaf<IsDistanceEarned>(280)
-                    .leaf<RunAsInstructed>(20, 60, 0.0)
-                .end()
-                .composite<BrainTree::ParallelSequence>(1,2)
-                    .leaf<IsDistanceEarned>(252)
-                    .leaf<RunAsInstructed>(50, 20, 0.0)
-                .end()
-                .composite<BrainTree::ParallelSequence>(1,2)
-                    .leaf<IsDistanceEarned>(253)
+                .composite<BrainTree::ParallelSequence>(1,2)//第一スラローム開始
+                    .leaf<IsDistanceEarned>(100)
                     .leaf<RunAsInstructed>(20, 50, 0.0)
+                .end()
+                .composite<BrainTree::ParallelSequence>(1,2)
+                    .leaf<IsDistanceEarned>(20)
+                    .leaf<RunAsInstructed>(30, 30, 0.0)
+                .end()
+                .composite<BrainTree::ParallelSequence>(1,2)//第二スラローム開始
+                    .leaf<IsDistanceEarned>(70)
+                    .leaf<RunAsInstructed>(50, 15, 0.0)
+                .end()
+                .composite<BrainTree::ParallelSequence>(1,2)
+                    .leaf<IsDistanceEarned>(130)
+                    .leaf<RunAsInstructed>(40, 15, 0.0)
+                .end()
+                .composite<BrainTree::ParallelSequence>(1,2)
+                    .leaf<IsDistanceEarned>(100)
+                    .leaf<RunAsInstructed>(30, 30, 0.0)
+                .end()
+                .composite<BrainTree::ParallelSequence>(1,2)//第三スラローム開始
+                    .leaf<IsDistanceEarned>(180)
+                    .leaf<RunAsInstructed>(15, 50, 0.0)
+                .end()
+                .composite<BrainTree::ParallelSequence>(1,2)
+                    .leaf<IsDistanceEarned>(100)
+                    .leaf<RunAsInstructed>(30, 30, 0.0)
+                .end()
+                .composite<BrainTree::ParallelSequence>(1,2)//ガレージカードスラローム開始
+                    .leaf<IsDistanceEarned>(200)
+                    .leaf<RunAsInstructed>(50, 15, 0.0)
+                .end()
+                .composite<BrainTree::ParallelSequence>(1,2)
+                    .leaf<IsDistanceEarned>(70)
+                    .leaf<RunAsInstructed>(30, 30, 0.0)
+                .end()
+                .composite<BrainTree::ParallelSequence>(1,2)
+                    .leaf<IsDistanceEarned>(80)
+                    .leaf<RunAsInstructed>(15, 50, 0.0)
+                .end()
+                .composite<BrainTree::ParallelSequence>(1,2)
+                    .leaf<IsDistanceEarned>(100)
+                    .leaf<RunAsInstructed>(30, 30, 0.0)
                 .end()
                 .composite<BrainTree::ParallelSequence>(1,2)
                     .leaf<RunAsInstructed>(0, 0, 0.0)
@@ -898,5 +923,3 @@ void update_task(intptr_t unused) {
 
     //logger->outputLog(LOG_INTERVAL);
 }
-
-
