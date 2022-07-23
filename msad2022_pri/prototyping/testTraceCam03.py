@@ -52,11 +52,11 @@ while True:
     img_bin = cv2.inRange(img_gray, gs_min, gs_max)
     # remove noise
     kernel = np.ones((7,7), np.uint8)
-    img_bin = cv2.morphologyEx(img_bin, cv2.MORPH_CLOSE, kernel)
+    img_bin_mor = cv2.morphologyEx(img_bin, cv2.MORPH_CLOSE, kernel)
 
     # focus on the region of interest
     x, y, w, h = roi
-    img_roi = img_bin[y:y+h, x:x+w]
+    img_roi = img_bin_mor[y:y+h, x:x+w]
     # find contours in the roi with offset
     contours, hierarchy = cv2.findContours(img_roi, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE, offset=(x,y))
     # identify the largest contour
@@ -110,9 +110,15 @@ while True:
     cv2.rectangle(img_orig, (x,y), (x+w,y+h), (255,0,0), 10)
     # draw the trace target on the image
     cv2.circle(img_orig, (mx, FRAME_HEIGHT-10), 20, (0,0,255), -1)
-    # approximate the delta in rotation (z-axis) 
-    dx = (mx - int(FRAME_WIDTH/2)) / int(FRAME_WIDTH/2)
-    print(f"mx = {mx}, dx = {dx}")
+    # calculate variance of mx from the center in pixel
+    vxp = mx - int(FRAME_WIDTH/2)
+    # convert the variance from pixel to milimeters
+    # 72 is length of the closest horizontal line on ground within the camera vision
+    vxm = vxp * 72 / 640
+    # calculate the rotation in radians (z-axis)
+    # 284 is distance from axle to the closest horizontal line on ground the camera can see
+    theta = math.atan(vxm / 284) 
+    print(f"mx = {mx}, vxm = {vxm}, theta = {theta}")
 
     # shrink the image to avoid delay in transmission
     img_comm = cv2.resize(img_orig, (int(img_orig.shape[1]/4), int(img_orig.shape[0]/4)))
