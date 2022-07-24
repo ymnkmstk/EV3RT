@@ -148,17 +148,17 @@ class SonarTestForSlalom : public BrainTree::Node {
 public:
     SonarTestForSlalom(int32_t d) : alertDistance(d) {}
     Status update() override {
-        int32_t distance = 10 * (sonarSensor->getDistance());
+        distance = 10 * (sonarSensor->getDistance());
         _log("sonar alert at %d", distance);
 //        if ((distance <= alertDistance) && (distance >= 0)) {
 //            _log("sonar alert at %d", distance);
 //            return Status::Success;
 //        } else {
-        if (distance > 220) {
+        if (0 < distance && distance <= 250) {
             //state = ST_SLALOM_SECOND_A;
             *ptrSlalomPattern = 1;
             return Status::Success;
-        } else if (distance <= 220 && distance > 0) {
+        } else if (300 < distance && distance < 400) {
             //state = ST_SLALOM_SECOND_B;
             *ptrSlalomPattern = 2;
             return Status::Success;
@@ -169,6 +169,7 @@ public:
     }
 protected:
     int32_t alertDistance;
+    int32_t distance;
 };
 
 /*
@@ -703,58 +704,7 @@ app.h on RasPike.
     tr_slalom_first = (BrainTree::BehaviorTree*) BrainTree::Builder()
         .composite<BrainTree::ParallelSequence>(1,2)
             .leaf<IsBackOn>()
-            .composite<BrainTree::MemSequence>()
-                .composite<BrainTree::ParallelSequence>(1,2)
-                    .leaf<IsDistanceEarned>(30)
-                    .leaf<RunAsInstructed>(70, 0, 0.0)
-                .end()
-                .composite<BrainTree::ParallelSequence>(1,2)
-                    .leaf<IsDistanceEarned>(85)
-                    .leaf<RunAsInstructed>(0, 70, 0.0)
-                .end()
-                .composite<BrainTree::ParallelSequence>(1,2)
-                    .leaf<IsDistanceEarned>(280)
-                    .leaf<RunAsInstructed>(50, 20, 0.0)
-                .end()
-                .composite<BrainTree::ParallelSequence>(1,2)
-                    .leaf<IsDistanceEarned>(280)
-                    .leaf<RunAsInstructed>(20, 60, 0.0)
-                .end()
-                .composite<BrainTree::ParallelSequence>(1,2)
-                    .leaf<IsDistanceEarned>(252)
-                    .leaf<RunAsInstructed>(50, 20, 0.0)
-                .end()
-                .composite<BrainTree::ParallelSequence>(1,2)
-                    .leaf<IsDistanceEarned>(253)
-                    .leaf<RunAsInstructed>(20, 50, 0.0)
-                .end()
-                .composite<BrainTree::ParallelSequence>(1,2)
-                    .leaf<RunAsInstructed>(0, 0, 0.0)
-                .end()
-                .composite<BrainTree::ParallelSequence>(1,2)
-                    .leaf<IsDistanceEarned>(130)
-                    .leaf<RunAsInstructed>(15, 35, 0.0)
-                .end()
-                .composite<BrainTree::ParallelSequence>(1,2)
-                    .leaf<IsDistanceEarned>(250)
-                    .leaf<RunAsInstructed>(40, 20, 0.0)
-                .end()
-                .composite<BrainTree::ParallelSequence>(1,2)
-                    .leaf<IsDistanceEarned>(251)
-                    .leaf<RunAsInstructed>(20, 40, 0.0)
-                .end()
-                .composite<BrainTree::ParallelSequence>(1,2)
-                    .leaf<IsDistanceEarned>(252)
-                    .leaf<RunAsInstructed>(40, 20, 0.0)
-                .end()
-                .composite<BrainTree::ParallelSequence>(1,2)
-                    .leaf<IsDistanceEarned>(253)
-                    .leaf<RunAsInstructed>(20, 40, 0.0)
-                .end()
-                .composite<BrainTree::ParallelSequence>(1,2)
-                    .leaf<RunAsInstructed>(0, 0, 0.0)
-                .end()
-            .end()
+            .leaf<IsTimeEarned>(100000) 
         .end()
     .build();
     
@@ -789,6 +739,7 @@ app.h on RasPike.
                     .composite<BrainTree::ParallelSequence>(1,2)
                         .leaf<IsTimeEarned>(2000000)
                         .leaf<SonarTestForSlalom>(1)
+                        .leaf<RunAsInstructed>(35, 0, 0.0)  //turn & sonar check
                     .end()
                 .end()
             .end()
