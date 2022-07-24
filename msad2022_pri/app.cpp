@@ -6,8 +6,15 @@
 #include "BrainTree.h"
 #include <opencv2/opencv.hpp>
 using namespace cv;
+/* 
+  NppCpp by David Pilger
+  git clone https://github.com/dpilger26/NumCpp.git
+  the use of NumCpp requires -std=c++14 for compilation
+*/
+#include "NumCpp.hpp"
 /*
-    BrainTree.h and opencv.hpp must present before ev3api.h on RasPike environment.
+    BrainTree.h, opencv.hpp and NumCpp.hpp must present
+    before ev3api.h on RasPike environment.
     Note that ev3api.h is included by app.h.
 */
 #include "app.h"
@@ -16,9 +23,11 @@ using namespace cv;
 #include <list>
 #include <numeric>
 #include <math.h>
+using namespace std;
 
 #define FRAME_WIDTH  640
 #define FRAME_HEIGHT 480
+#define ROI_BOUNDARY 50
 
 /* this is to avoid linker error, undefined reference to `__sync_synchronize' */
 extern "C" void __sync_synchronize() {}
@@ -328,21 +337,28 @@ protected:
 
 /*
     usage:
-    ".leaf<TraceLineCam>(speed, p, i, d, h_min, h_max, s_min, s_max, v_min, v_max, srew_rate, trace_side)"
+    ".leaf<TraceLineCam>(speed, p, i, d, gs_min, gs_max, srew_rate, trace_side)"
     is to instruct the robot to trace the line in backward at the given speed.
     p, i, d are constants for PID control.
-    h_min, h_max, s_min, s_max, v_min, v_max are HSV threshold for line recognition binalization.
+    gs_min, gs_max are grayscale threshold for line recognition binalization.
     srew_rate = 0.0 indidates NO tropezoidal motion.
     srew_rate = 0.5 instructs FilteredMotor to change 1 pwm every two executions of update()
     until the current speed gradually reaches the instructed target speed.
     trace_side = TS_NORMAL   when in R(L) course and tracing the right(left) side of the line.
     trace_side = TS_OPPOSITE when in R(L) course and tracing the left(right) side of the line.
+    trace_side = TS_CENTER   when tracing the center of the line.
 */
 class TraceLineCam : public BrainTree::Node {
 public:
-  TraceLineCam(int s, double p, double i, double d, int h_min, int h_max, int s_min, int s_max, int v_min, int v_max, double srew_rate, TraceSide trace_side) : speed(s),hmin(h_min),hmax(h_max),smin(s_min),smax(s_max),vmin(v_min),vmax(v_max),srewRate(srew_rate),side(trace_side) {
+  TraceLineCam(int s, double p, double i, double d, int gs_min, int gs_max, double srew_rate, TraceSide trace_side) : speed(s),gsmin(gs_min),gsmax(gs_max),srewRate(srew_rate),side(trace_side) {
         updated = false;
         ltPid = new PIDcalculator(p, i, d, PERIOD_UPD_TSK, -speed, speed);
+	/* initial region of interest */
+	roi = Rect(0, 0, FRAME_WIDTH, FRAME_HEIGHT);
+	/* initial trace target */
+	mx = (int)(FRAME_WIDTH/2);
+	/* prepare and keep kernel for morphology */
+	kernel = Mat::zeros(Size(7,7), CV_8UC1);
     }
     ~TraceLineCam() {
         delete ltPid;
@@ -358,13 +374,12 @@ public:
             updated = true;
         }
 
-	Mat img_bgr, img_med, img_hsv, img_bin, img_inv, img_edge;
-	int mx_cnv = 50;
+	Mat img_orig, img_gray, img_bin, img_bin_mor, img_cnt_gray, scan_line;
 
 	ER ercd = tloc_mtx(MTX1, 1000U); // test and lock the mutex
 	if (ercd == E_OK) { // if successfully locked, process the frame and unlock the mutex; otherwise, return running
-	  /* crop the nearest/bottom part of the image */
-	  img_bgr = Mat(frame, Rect(0,FRAME_HEIGHT/2,FRAME_WIDTH,FRAME_HEIGHT/2));
+	  /* clone the image */
+	  img_orig = frame.clone();
 	  ercd = unl_mtx(MTX1);
 	  assert(ercd == E_OK);
 	} else {
@@ -373,113 +388,118 @@ public:
 	  return Status::Running;
 	}
 
-	/* reduce the noise */
-	//medianBlur(img_bgr, img_med, 5);
-	/* convert the image from BGR to HSV */
+	/* convert the image from BGR to grayscale */
 	loc_cpu(); /* disable interrupts */
-	cvtColor(img_bgr, img_hsv, COLOR_BGR2HSV);
+	cvtColor(img_orig, img_gray, COLOR_BGR2GRAY);
 	unl_cpu(); /* enable interrupts */
+	/* mask the upper half of the grayscale image */
+	for (int i = 0; i < (int)(FRAME_HEIGHT/2); i++) {
+	  for (int j = 0; j < FRAME_WIDTH; j++) {
+	    img_gray.at<uchar>(i,j) = 255; /* type = CV_8U */
+	  }
+	}
 	/* binarize the image */
-	inRange(img_hsv, Scalar(hmin,smin,vmin), Scalar(hmax,smax,vmax), img_bin);
-	/* inverse the image */
-	bitwise_not(img_bin, img_inv);
-	/* label connected components in the image */
-	Mat img_labeled, stats, centroids;
+	inRange(img_gray, gsmin, gsmax, img_bin);
+	/* remove noise */
+	morphologyEx(img_bin, img_bin_mor, MORPH_CLOSE, kernel);
+
+	/* focus on the region of interest */
+	Mat img_roi(img_bin_mor, roi);
+	/* find contours in the roi with offset */
+	vector<vector<Point>> contours;
+	vector<Vec4i> hierarchy;
 	loc_cpu(); /* disable interrupts */
-	int num_labels = connectedComponentsWithStats(img_inv, img_labeled, stats, centroids);
+	findContours(img_roi, contours, hierarchy, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE, Point(roi.x,roi.y));
 	unl_cpu(); /* enable interrupts */
-	
-	/* ignore the largest black part (the first label) */
-	Mat stats_rest, centroids_rest;
-	for (int i = 1; i < num_labels; i++) {
-	  stats_rest.push_back(stats.row(i));
-	  centroids_rest.push_back(centroids.row(i));
-	}
-	num_labels--;
+	/* identify the largest contour */
+	if (contours.size() >= 1) {
+	  int i_area_max = 0;
+	  double area_max = 0.0;
+	  for (int i = 0; i < contours.size(); i++) {
+	    double area = contourArea(contours[i]);
+	    if (area > area_max) {
+	      area_max = area;
+	      i_area_max = i;
+	    }
+	  }
 
-	/* prepare an empty matrix */
-	Mat img_lbl = Mat::zeros(img_bin.size(), CV_8UC1);
-
-	if (num_labels >= 1) {
-	  /* obtain the index to the label which has the largest area,
-	     corresponding to
-	     index = np.argmax(stats[:,4]) in Python */
-	  int index = 0, area_largest = 0;
-	  for (int i = 0; i < num_labels; i++) {
-	    if (stats_rest.at<int>(i,4) > area_largest) {
-	      index = i;
-	      area_largest = stats_rest.at<int>(i,4);
-	    }
+	  /* calculate the bounding box around the largest contour
+	     and set it as the new region of interest */ 
+	  roi = boundingRect(contours[i_area_max]);
+	  /* adjust the region of interest */
+	  roi.x = roi.x - ROI_BOUNDARY;
+	  roi.y = roi.y - ROI_BOUNDARY;
+	  roi.width = roi.width + 2*ROI_BOUNDARY;
+	  roi.height = roi.height + 2*ROI_BOUNDARY;
+	  if (roi.x < 0) {
+	    roi.x = 0;
 	  }
-	  /* obtain the attributes of the label */
-	  //int x = stats_rest.at<int>(index,0);
-	  //int y = stats_rest.at<int>(index,1);
-	  //int w = stats_rest.at<int>(index,2);
-	  //int h = stats_rest.at<int>(index,3);
-	  //int s = stats_rest.at<int>(index,4);
-	  int mx = centroids_rest.at<double>(index,0);
-	  //int my = centroids_rest.at<double>(index,1);
-	  /* copy the largest component in the empty matrix */
-	  for (int i = 0; i < img_labeled.size().height; i++) {
-	    for (int j = 0; j < img_labeled.size().width; j++) {
-	      if (img_labeled.at<int>(i,j) == index+1) { /* type = CV_32S */
-		img_lbl.at<uchar>(i,j) = 255; /* type = CV_8U */
-	      }
-	    }
+	  if (roi.y < 0) {
+	    roi.y = 0;
 	  }
-	  /* detect edges */
+	  if (roi.x + roi.width > FRAME_WIDTH) {
+	    roi.width = FRAME_WIDTH - roi.x;
+	  }
+	  if (roi.y + roi.height > FRAME_HEIGHT) {
+	    roi.height = FRAME_HEIGHT - roi.y;
+	  }
+ 
+	  /* prepare for trace target calculation */
+	  /*
+	    Note: Mat::zeros with CV_8UC3 does NOT work and don't know why
+	  */
+	  Mat img_cnt(img_orig.size(), CV_8UC3, Scalar(0,0,0));
+	  drawContours(img_cnt, (vector<vector<Point>>){contours[i_area_max]}, 0, Scalar(0,255,0), 1);
 	  loc_cpu(); /* disable interrupts */
-	  Canny(img_lbl, img_edge, 255, 255, 3, false);
+	  cvtColor(img_cnt, img_cnt_gray, COLOR_BGR2GRAY);
 	  unl_cpu(); /* enable interrupts */
-	  /* find contours */
-	  std::vector<std::vector<Point>> contours;
-	  std::vector<Vec4i> hierarchy;
-	  loc_cpu(); /* disable interrupts */
-	  findContours(img_edge, contours, hierarchy, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE);
-	  unl_cpu(); /* enable interrupts */
-	  if (contours.size() >= 2) {
-	    /* derive an approximated line for either edge by regression */
-	    Vec4f lin; /* vx, vy, x0, y0 */
-	    fitLine(contours[side], lin, DIST_L2, 0, 0.01, 0.01);
-	    float m = FRAME_WIDTH;
-	    Point p1,p2;
-	    p1.x = (int)(lin[2] - m*lin[0]);
-	    p1.y = (int)(lin[3] - m*lin[1]);
-	    p2.x = (int)(lin[2] + m*lin[0]);
-	    p2.y = (int)(lin[3] + m*lin[1]);
-	    clipLine(Rect(0,0,img_edge.size().width,img_edge.size().height), p1, p2);
-	    /* adjust the centroid by the line tilt */
-	    if (lin[1] != 0) {
-	      if (p1.y < p2.y) {
-		mx = mx + 1.0*(p1.x - p2.x);
-	      } else if (p1.y > p2.y) {
-		mx = mx + 1.0*(p2.x - p1.x);
-	      } /* note that mx can be 0- or 640+, depending on p1.x and p2.x */
+	  /* scan the line really close to the image bottom to find edges */
+	  scan_line = img_cnt_gray.row(img_cnt_gray.size().height -10);
+	  /* convert the Mat to a NumCpp array */
+	  auto scan_line_nc = nc::NdArray<nc::uint8>(scan_line.data, scan_line.rows, scan_line.cols);
+	  auto edges = scan_line_nc.flatnonzero();
+	  if (edges.size() >= 2) {
+	    if (side != 2) {
+	      mx = edges[side];
+	    } else {
+	      mx = (int)((edges[0]+edges[1]) / 2);
 	    }
+	  } else if (edges.size() == 1) {
+	    mx = edges[0];
 	  }
-	  mx_cnv = int(mx * 100 / FRAME_WIDTH); /* convert scale from 0-640 to 0-100 */
 	}
+
+	/* calculate variance of mx from the center in pixel */
+	int vxp = mx - (int)(FRAME_WIDTH/2);
+	/* convert the variance from pixel to milimeters
+	   72 is length of the closest horizontal line on ground within the camera vision */
+	float vxm = vxp * 72 / 640;
+	/* calculate the rotation in degree (z-axis)
+	   284 is distance from axle to the closest horizontal line on ground the camera can see */
+	float theta = 180 * atan(vxm / 284) / M_PI;
+	_log("mx = %d, vxm = %d, theta = %d", mx, (int)vxm, (int)theta);
 	
         int8_t backward, turn, pwmL, pwmR;
 
         /* compute necessary amount of steering by PID control */
-        turn = (-1) * _COURSE * ltPid->compute(mx_cnv, 50); /* 50 is the center */
-	_log("mx_cnv = %d, turn = %d", mx_cnv, turn);
+        turn = (-1) * _COURSE * ltPid->compute(theta, 0); /* 0 is the center */
         backward = -speed;
         /* steer EV3 by setting different speed to the motors */
         pwmL = backward - turn;
         pwmR = backward + turn;
         srlfL->setRate(srewRate);
-        leftMotor->setPWM(pwmL);
+        //leftMotor->setPWM(pwmL);
         srlfR->setRate(srewRate);
-        rightMotor->setPWM(pwmR);
+        //rightMotor->setPWM(pwmR);
         return Status::Running;
     }
 protected:
-    int speed, hmin, hmax, smin, smax, vmin, vmax;
+    int speed, gsmin, gsmax, mx;
     PIDcalculator* ltPid;
     double srewRate;
     TraceSide side;
+    Rect roi;
+    Mat kernel;
     bool updated;
 };
 
@@ -767,32 +787,37 @@ void main_task(intptr_t unused) {
 */ 
 
 #if defined(MAKE_RIGHT) /* BEHAVIOR FOR THE RIGHT COURSE STARTS HERE */
-    tr_run = nullptr;
+    tr_run = (BrainTree::BehaviorTree*) BrainTree::Builder()
+      .composite<BrainTree::ParallelSequence>(1,2)
+        .leaf<IsTimeEarned>(30000000) /* count 30 seconds */
+        .leaf<TraceLine>(SPEED_NORM, GS_TARGET, P_CONST, I_CONST, D_CONST, 0.0, TS_NORMAL)
+      .end()
+      .build();
+    
     tr_block = nullptr;
 
 #else /* BEHAVIOR FOR THE LEFT COURSE STARTS HERE */
     tr_run = (BrainTree::BehaviorTree*) BrainTree::Builder()
-        .composite<BrainTree::ParallelSequence>(1,3)
-            .leaf<IsBackOn>()
-            .leaf<IsDistanceEarned>(1000)
-            .composite<BrainTree::MemSequence>()
-                .leaf<IsColorDetected>(CL_BLACK)
-                .leaf<IsColorDetected>(CL_BLUE)
-            .end()
-        .leaf<TraceLineCam>(35, 0.1, 0.39, D_CONST, 0, 179, 0, 255, 130, 255, 0.0, TS_NORMAL)
-      /* P=0.1 */
-        /* P=0.75, I=0.39, D=0.08 */
-        .end()
-        .build();
+      .composite<BrainTree::ParallelSequence>(1,3)
+        .leaf<IsBackOn>()
+        .leaf<IsDistanceEarned>(1000)
+        .composite<BrainTree::MemSequence>()
+          .leaf<IsColorDetected>(CL_BLACK)
+          .leaf<IsColorDetected>(CL_BLUE)
+      .end()
+      .leaf<TraceLineCam>(35, 0.1, 0.39, D_CONST, 0, 100, 0.0, TS_NORMAL)
+      /* P=0.75, I=0.39, D=0.08 */
+      .end()
+      .build();
 
     tr_block = (BrainTree::BehaviorTree*) BrainTree::Builder()
-        .composite<BrainTree::MemSequence>()
-            .leaf<StopNow>()
-            .leaf<IsTimeEarned>(3000000) // wait 3 seconds
-            .leaf<TraceLine>(SPEED_NORM, GS_TARGET, P_CONST, I_CONST, D_CONST, 0.0, TS_NORMAL)
-            .leaf<StopNow>()
-        .end()
-        .build();
+      .composite<BrainTree::MemSequence>()
+        .leaf<StopNow>()
+        .leaf<IsTimeEarned>(3000000) // wait 3 seconds
+        .leaf<TraceLine>(SPEED_NORM, GS_TARGET, P_CONST, I_CONST, D_CONST, 0.0, TS_NORMAL)
+        .leaf<StopNow>()
+      .end()
+      .build();
 
 #endif /* if defined(MAKE_RIGHT) */
 
