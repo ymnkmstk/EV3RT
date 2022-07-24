@@ -310,6 +310,12 @@ public:
                     return Status::Success;
                 }
                 break;
+            case CL_BLUE_SL:
+                if (cur_rgb.b - cur_rgb.r > 20 && cur_rgb.g <= 100 && cur_rgb.b <= 120) {
+                    _log("ODO=%05d, CL_BLUE_SL detected.", plotter->getDistance());
+                    return Status::Success;
+                }
+                break;
             default:
                 break;
         }
@@ -581,7 +587,7 @@ void main_task(intptr_t unused) {
     ev3clock    = new Clock();
     touchSensor = new TouchSensor(PORT_1);
     // temp fix 2022/6/20 W.Taniguchi, new SonarSensor() blocks apparently
-    //sonarSensor = new SonarSensor(PORT_3);
+    sonarSensor = new SonarSensor(PORT_3);
     colorSensor = new FilteredColorSensor(PORT_2);
     gyroSensor  = new GyroSensor(PORT_4);
     leftMotor   = new FilteredMotor(PORT_C);
@@ -646,7 +652,7 @@ void main_task(intptr_t unused) {
     ToDo: earned distance is not calculated properly parhaps because the task is NOT invoked every 10ms as defined in app.h on RasPike.
     dentify a realistic PERIOD_UPD_TSK.  It also impacts PID calculation.
 */
-            .leaf<IsDistanceEarned>(400)
+            .leaf<IsDistanceEarned>(0)
             .composite<BrainTree::MemSequence>()
                 .leaf<IsColorDetected>(CL_BLACK)
                 .leaf<IsColorDetected>(CL_BLUE)
@@ -665,29 +671,37 @@ void main_task(intptr_t unused) {
                 .end()
             */
                 .composite<BrainTree::ParallelSequence>(1,2)//初期位置調整のために、台上で短距離ライントレース
-                    .leaf<IsDistanceEarned>(10)
+                    .leaf<IsDistanceEarned>(30)
                     .leaf<TraceLine>(30, GS_TARGET, P_CONST, I_CONST, D_CONST, 0.0, TS_OPPOSITE)
-                    //.leaf<RunAsInstructed>(30, 30, 0.0)
+                    //.leaf<RunAsInstructed>(40, 20, 0.0)
                 .end()
                 .composite<BrainTree::ParallelSequence>(1,2)//第一スラローム開始
                     .leaf<IsDistanceEarned>(100)
                     .leaf<RunAsInstructed>(20, 50, 0.0)
                 .end()
                 .composite<BrainTree::ParallelSequence>(1,2)
-                    .leaf<IsDistanceEarned>(20)
+                    .leaf<IsDistanceEarned>(30)
                     .leaf<RunAsInstructed>(30, 30, 0.0)
                 .end()
                 .composite<BrainTree::ParallelSequence>(1,2)//第二スラローム開始
-                    .leaf<IsDistanceEarned>(70)
-                    .leaf<RunAsInstructed>(50, 15, 0.0)
+                    .leaf<IsDistanceEarned>(120)
+                    .leaf<RunAsInstructed>(60, 15, 0.0)
                 .end()
                 .composite<BrainTree::ParallelSequence>(1,2)
-                    .leaf<IsDistanceEarned>(130)
+                    .leaf<IsDistanceEarned>(30)
+                    .leaf<RunAsInstructed>(15, 40, 0.0)
+                .end()
+                .composite<BrainTree::ParallelSequence>(1,2)
+                    .leaf<IsDistanceEarned>(10)
+                    .leaf<RunAsInstructed>(30, 30, 0.0)
+                .end()
+                .composite<BrainTree::ParallelSequence>(1,2)
+                    .leaf<IsDistanceEarned>(80)
                     .leaf<RunAsInstructed>(40, 15, 0.0)
                 .end()
                 .composite<BrainTree::ParallelSequence>(1,2)//黒検知したらライントレース
                     .leaf<IsColorDetected>(CL_BLACK)
-                    .leaf<RunAsInstructed>(30, 30, 0.0)
+                    .leaf<RunAsInstructed>(30, 20, 0.0)
                 .end()
                 .composite<BrainTree::ParallelSequence>(1,2)
                     .leaf<IsDistanceEarned>(180)
@@ -700,10 +714,11 @@ void main_task(intptr_t unused) {
                 .end()
                 .composite<BrainTree::ParallelSequence>(1,2)
                     .leaf<IsDistanceEarned>(20)
-                    .leaf<RunAsInstructed>(30, 30, 0.0)
+                    .leaf<RunAsInstructed>(50, 15, 0.0)
                 .end()
                 .composite<BrainTree::ParallelSequence>(1,2)//第三スラローム開始 ライントレース
-                    .leaf<IsDistanceEarned>(250)
+                    //.leaf<IsDistanceEarned>(230)
+                    .leaf<IsSonarOn>(500)
                     .leaf<TraceLine>(30, 50, P_CONST, I_CONST, D_CONST, 0.0, TS_NORMAL)
                 .end()
                 .composite<BrainTree::ParallelSequence>(1,2)//ガレージカードスラローム開始
@@ -711,7 +726,7 @@ void main_task(intptr_t unused) {
                     .leaf<RunAsInstructed>(50, 15, 0.0)
                 .end()
                 .composite<BrainTree::ParallelSequence>(1,2)
-                    .leaf<IsDistanceEarned>(80)
+                    .leaf<IsDistanceEarned>(100)
                     .leaf<RunAsInstructed>(30, 30, 0.0)
                 .end()
                 .composite<BrainTree::ParallelSequence>(1,2)
@@ -719,7 +734,8 @@ void main_task(intptr_t unused) {
                     .leaf<RunAsInstructed>(15, 50, 0.0)
                 .end()
                 .composite<BrainTree::ParallelSequence>(1,2)
-                    .leaf<IsDistanceEarned>(80)
+                    //.leaf<IsDistanceEarned>(50)
+                    .leaf<IsColorDetected>(CL_BLUE_SL)
                     .leaf<RunAsInstructed>(30, 30, 0.0)
                 .end()
                 .composite<BrainTree::ParallelSequence>(1,2)
