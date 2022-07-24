@@ -778,7 +778,7 @@ void main_task(intptr_t unused) {
                 .end()
                 //turn
                 .composite<BrainTree::ParallelSequence>(1,2)
-                    .leaf<IsTimeEarned>(1100000)
+                    .leaf<IsTimeEarned>(1350000)
                     .leaf<RunAsInstructed>(0, 50, 0.0)
                 .end()
                 //sonarcheck
@@ -787,8 +787,17 @@ void main_task(intptr_t unused) {
                     .leaf<RunAsInstructed>(0, 0, 0.0)
                  //   .leaf<IsSonarTest>(1)
                 .end()
+                .composite<BrainTree::ParallelSequence>(1,2)//後半第一スラローム開始
+                    .leaf<IsDistanceEarned>(50)
+                    .leaf<RunAsInstructed>(40, 40, 0.0)
+                .end()
                 .composite<BrainTree::ParallelSequence>(1,2)
-                    .leaf<RunAsInstructed>(0, 0, 0.0)
+                    .leaf<IsDistanceEarned>(100)
+                    .leaf<RunAsInstructed>(20, 50, 0.0)
+                .end()
+                .composite<BrainTree::ParallelSequence>(1,2)//後半第二スラローム開始
+                    .leaf<IsDistanceEarned>(250)
+                    .leaf<RunAsInstructed>(40, 40, 0.0)
                 .end()
             .end()
         .end()
