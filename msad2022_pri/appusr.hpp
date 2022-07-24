@@ -99,7 +99,7 @@ extern Plotter*     plotter;
 #endif
 
 #ifndef JUMP
-#define JUMP                    0
+#define JUMP                    2   //CHANGE
 #endif
 
 #ifndef LOG_INTERVAL
@@ -133,7 +133,15 @@ enum State {
     ST_INITIAL,
     ST_CALIBRATION,
     ST_RUN,
+/*  OUT
     ST_SLALOM,
+*/
+    //NEW
+    ST_SLALOM_FIRST,
+    ST_SLALOM_CHECK,
+    ST_SLALOM_SECOND_A,
+    ST_SLALOM_SECOND_B,
+    //NEW
     ST_BLOCK,
     ST_ENDING,
     ST_END,
