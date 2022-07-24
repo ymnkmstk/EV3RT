@@ -132,6 +132,24 @@ protected:
 
 /*
     usage:
+    ".leaf<IsSonarTest>(distance)"
+    is to determine if the robot is closer than the spedified alert distance to Log.
+*/
+class IsSonarTest : public BrainTree::Node {
+public:
+    IsSonarTest(int32_t d) : alertDistance(d) {}
+    Status update() override {
+        int32_t distance = 10 * (sonarSensor->getDistance());
+        _log("sonar alert at %d", distance);
+            return Status::Failure;
+    }
+protected:
+    int32_t alertDistance;
+};
+
+
+/*
+    usage:
     ".leaf<IsAngleLarger>(angle)"
     is to determine if the angular location of the robot measured by the gyro sensor is larger than the spedified angular value.
     angle is in degree.
@@ -696,7 +714,7 @@ void main_task(intptr_t unused) {
                     .leaf<RunAsInstructed>(30, 30, 0.0)
                 .end()
                 .composite<BrainTree::ParallelSequence>(1,2)
-                    .leaf<IsDistanceEarned>(80)
+                    .leaf<IsDistanceEarned>(70)
                     .leaf<RunAsInstructed>(40, 15, 0.0)
                 .end()
                 .composite<BrainTree::ParallelSequence>(1,2)//黒検知したらライントレース
@@ -704,8 +722,8 @@ void main_task(intptr_t unused) {
                     .leaf<RunAsInstructed>(30, 20, 0.0)
                 .end()
                 .composite<BrainTree::ParallelSequence>(1,2)
-                    .leaf<IsDistanceEarned>(180)
-                    .leaf<TraceLine>(30, 50, P_CONST, I_CONST, D_CONST, 0.0, TS_OPPOSITE)
+                    .leaf<IsDistanceEarned>(160)
+                    .leaf<TraceLine>(30, 47, P_CONST, I_CONST, D_CONST, 0.0, TS_OPPOSITE)
                 .end()
 
                 .composite<BrainTree::ParallelSequence>(1,2)//ライントレースおもてなし
@@ -717,26 +735,57 @@ void main_task(intptr_t unused) {
                     .leaf<RunAsInstructed>(50, 15, 0.0)
                 .end()
                 .composite<BrainTree::ParallelSequence>(1,2)//第三スラローム開始 ライントレース
-                    //.leaf<IsDistanceEarned>(230)
-                    .leaf<IsSonarOn>(500)
-                    .leaf<TraceLine>(30, 50, P_CONST, I_CONST, D_CONST, 0.0, TS_NORMAL)
+                    .leaf<IsDistanceEarned>(160)
+                    .leaf<TraceLine>(30, 47, P_CONST, I_CONST, D_CONST, 0.0, TS_NORMAL)
+                .end()
+                .composite<BrainTree::ParallelSequence>(1,2)//第三スラローム開始 ライントレース
+                    //.leaf<IsDistanceEarned>(50)
+                    .leaf<IsSonarOn>(500)//超音波センサー＆ライトレースによるチェックポイント
+                    .leaf<TraceLine>(30, 47, P_CONST, I_CONST, D_CONST, 0.0, TS_NORMAL)
                 .end()
                 .composite<BrainTree::ParallelSequence>(1,2)//ガレージカードスラローム開始
-                    .leaf<IsDistanceEarned>(100)
+                    .leaf<IsDistanceEarned>(90)
                     .leaf<RunAsInstructed>(50, 15, 0.0)
                 .end()
                 .composite<BrainTree::ParallelSequence>(1,2)
-                    .leaf<IsDistanceEarned>(100)
+                    .leaf<IsDistanceEarned>(80)
                     .leaf<RunAsInstructed>(30, 30, 0.0)
                 .end()
                 .composite<BrainTree::ParallelSequence>(1,2)
-                    .leaf<IsDistanceEarned>(80)
+                    .leaf<IsDistanceEarned>(60)
                     .leaf<RunAsInstructed>(15, 50, 0.0)
                 .end()
                 .composite<BrainTree::ParallelSequence>(1,2)
                     //.leaf<IsDistanceEarned>(50)
                     .leaf<IsColorDetected>(CL_BLUE_SL)
                     .leaf<RunAsInstructed>(30, 30, 0.0)
+                .end()
+                //台上転回後、センサーでコースパターン判定
+                               //back
+                .composite<BrainTree::ParallelSequence>(1,2)
+                    .leaf<IsTimeEarned>(700000)
+                    .leaf<RunAsInstructed>(-40, -40, 0.0)
+                .end()
+                //leftback
+                .composite<BrainTree::ParallelSequence>(1,2)
+                    .leaf<IsTimeEarned>(500000)
+                    .leaf<RunAsInstructed>(-40, 0, 0.0)
+                .end()
+                //foward
+                .composite<BrainTree::ParallelSequence>(1,2)
+                    .leaf<IsTimeEarned>(450000)
+                    .leaf<RunAsInstructed>(50, 50, 0.0)
+                .end()
+                //turn
+                .composite<BrainTree::ParallelSequence>(1,2)
+                    .leaf<IsTimeEarned>(1100000)
+                    .leaf<RunAsInstructed>(0, 50, 0.0)
+                .end()
+                //sonarcheck
+                .composite<BrainTree::ParallelSequence>(1,2)
+                    .leaf<IsTimeEarned>(2000000)
+                    .leaf<RunAsInstructed>(0, 0, 0.0)
+                 //   .leaf<IsSonarTest>(1)
                 .end()
                 .composite<BrainTree::ParallelSequence>(1,2)
                     .leaf<RunAsInstructed>(0, 0, 0.0)
@@ -814,6 +863,9 @@ void update_task(intptr_t unused) {
     ER ercd;
 
     colorSensor->sense();
+    //rgb_raw_t cur_rgb;
+    //colorSensor->getRawColor(cur_rgb);
+    //_log("r=%d g=%d b=%d",cur_rgb.r,cur_rgb.g,cur_rgb.b);
     plotter->plot();
 
 /*
