@@ -140,8 +140,9 @@ enum State {
 };
 
 enum TraceSide {
-    TS_NORMAL,
-    TS_OPPOSITE,
+    TS_NORMAL = 0,
+    TS_OPPOSITE = 1,
+    TS_CENTER = 2,
 };
 
 #endif /* appusr_hpp */

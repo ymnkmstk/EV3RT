@@ -4,9 +4,18 @@
     Copyright © 2022 MSAD Mode2P. All rights reserved.
 */
 #include "BrainTree.h"
+#include <opencv2/opencv.hpp>
+using namespace cv;
+/* 
+  NppCpp by David Pilger
+  git clone https://github.com/dpilger26/NumCpp.git
+  the use of NumCpp requires -std=c++14 for compilation
+*/
+#include "NumCpp.hpp"
 #include "Profile.hpp"
 /*
-    BrainTree.h must present before ev3api.h on RasPike environment.
+    BrainTree.h, opencv.hpp and NumCpp.hpp must present
+    before ev3api.h on RasPike environment.
     Note that ev3api.h is included by app.h.
 */
 #include "app.h"
@@ -15,7 +24,11 @@
 #include <list>
 #include <numeric>
 #include <math.h>
+using namespace std;
 
+#define FRAME_WIDTH  640
+#define FRAME_HEIGHT 480
+#define ROI_BOUNDARY 50
 
 /* this is to avoid linker error, undefined reference to `__sync_synchronize' */
 extern "C" void __sync_synchronize() {}
@@ -23,6 +36,8 @@ extern "C" void __sync_synchronize() {}
 /* global variables */
 FILE*           bt;
 Profile*        prof;
+VideoCapture    cap;
+Mat             frame;
 Clock*          ev3clock;
 TouchSensor*    touchSensor;
 SonarSensor*    sonarSensor;
@@ -324,6 +339,174 @@ protected:
 
 /*
     usage:
+    ".leaf<TraceLineCam>(speed, p, i, d, gs_min, gs_max, srew_rate, trace_side)"
+    is to instruct the robot to trace the line in backward at the given speed.
+    p, i, d are constants for PID control.
+    gs_min, gs_max are grayscale threshold for line recognition binalization.
+    srew_rate = 0.0 indidates NO tropezoidal motion.
+    srew_rate = 0.5 instructs FilteredMotor to change 1 pwm every two executions of update()
+    until the current speed gradually reaches the instructed target speed.
+    trace_side = TS_NORMAL   when in R(L) course and tracing the right(left) side of the line.
+    trace_side = TS_OPPOSITE when in R(L) course and tracing the left(right) side of the line.
+    trace_side = TS_CENTER   when tracing the center of the line.
+*/
+class TraceLineCam : public BrainTree::Node {
+public:
+  TraceLineCam(int s, double p, double i, double d, int gs_min, int gs_max, double srew_rate, TraceSide trace_side) : speed(s),gsmin(gs_min),gsmax(gs_max),srewRate(srew_rate),side(trace_side) {
+        updated = false;
+        ltPid = new PIDcalculator(p, i, d, PERIOD_UPD_TSK, -speed, speed);
+	/* initial region of interest */
+	roi = Rect(0, 0, FRAME_WIDTH, FRAME_HEIGHT);
+	/* initial trace target */
+	mx = (int)(FRAME_WIDTH/2);
+	/* prepare and keep kernel for morphology */
+	kernel = Mat::zeros(Size(7,7), CV_8UC1);
+    }
+    ~TraceLineCam() {
+        delete ltPid;
+    }
+    Status update() override {
+        if (!updated) {
+            /* The following code chunk is to properly set prevXin in SRLF */
+            srlfL->setRate(0.0);
+            leftMotor->setPWM(leftMotor->getPWM());
+            srlfR->setRate(0.0);
+            rightMotor->setPWM(rightMotor->getPWM());
+            _log("ODO=%05d, Camera Trace run started.", plotter->getDistance());
+            updated = true;
+        }
+
+	Mat img_orig, img_gray, img_bin, img_bin_mor, img_cnt_gray, scan_line;
+
+	ER ercd = tloc_mtx(MTX1, 1000U); // test and lock the mutex
+	if (ercd == E_OK) { // if successfully locked, process the frame and unlock the mutex; otherwise, return running
+	  /* clone the image */
+	  img_orig = frame.clone();
+	  ercd = unl_mtx(MTX1);
+	  assert(ercd == E_OK);
+	} else {
+	  _log("mutex lock failed with %d", ercd);
+	  assert(ercd == E_TMOUT);
+	  return Status::Running;
+	}
+
+	/* convert the image from BGR to grayscale */
+	loc_cpu(); /* disable interrupts */
+	cvtColor(img_orig, img_gray, COLOR_BGR2GRAY);
+	unl_cpu(); /* enable interrupts */
+	/* mask the upper half of the grayscale image */
+	for (int i = 0; i < (int)(FRAME_HEIGHT/2); i++) {
+	  for (int j = 0; j < FRAME_WIDTH; j++) {
+	    img_gray.at<uchar>(i,j) = 255; /* type = CV_8U */
+	  }
+	}
+	/* binarize the image */
+	inRange(img_gray, gsmin, gsmax, img_bin);
+	/* remove noise */
+	morphologyEx(img_bin, img_bin_mor, MORPH_CLOSE, kernel);
+
+	/* focus on the region of interest */
+	Mat img_roi(img_bin_mor, roi);
+	/* find contours in the roi with offset */
+	vector<vector<Point>> contours;
+	vector<Vec4i> hierarchy;
+	loc_cpu(); /* disable interrupts */
+	findContours(img_roi, contours, hierarchy, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE, Point(roi.x,roi.y));
+	unl_cpu(); /* enable interrupts */
+	/* identify the largest contour */
+	if (contours.size() >= 1) {
+	  int i_area_max = 0;
+	  double area_max = 0.0;
+	  for (int i = 0; i < contours.size(); i++) {
+	    double area = contourArea(contours[i]);
+	    if (area > area_max) {
+	      area_max = area;
+	      i_area_max = i;
+	    }
+	  }
+
+	  /* calculate the bounding box around the largest contour
+	     and set it as the new region of interest */ 
+	  roi = boundingRect(contours[i_area_max]);
+	  /* adjust the region of interest */
+	  roi.x = roi.x - ROI_BOUNDARY;
+	  roi.y = roi.y - ROI_BOUNDARY;
+	  roi.width = roi.width + 2*ROI_BOUNDARY;
+	  roi.height = roi.height + 2*ROI_BOUNDARY;
+	  if (roi.x < 0) {
+	    roi.x = 0;
+	  }
+	  if (roi.y < 0) {
+	    roi.y = 0;
+	  }
+	  if (roi.x + roi.width > FRAME_WIDTH) {
+	    roi.width = FRAME_WIDTH - roi.x;
+	  }
+	  if (roi.y + roi.height > FRAME_HEIGHT) {
+	    roi.height = FRAME_HEIGHT - roi.y;
+	  }
+ 
+	  /* prepare for trace target calculation */
+	  /*
+	    Note: Mat::zeros with CV_8UC3 does NOT work and don't know why
+	  */
+	  Mat img_cnt(img_orig.size(), CV_8UC3, Scalar(0,0,0));
+	  drawContours(img_cnt, (vector<vector<Point>>){contours[i_area_max]}, 0, Scalar(0,255,0), 1);
+	  loc_cpu(); /* disable interrupts */
+	  cvtColor(img_cnt, img_cnt_gray, COLOR_BGR2GRAY);
+	  unl_cpu(); /* enable interrupts */
+	  /* scan the line really close to the image bottom to find edges */
+	  scan_line = img_cnt_gray.row(img_cnt_gray.size().height -10);
+	  /* convert the Mat to a NumCpp array */
+	  auto scan_line_nc = nc::NdArray<nc::uint8>(scan_line.data, scan_line.rows, scan_line.cols);
+	  auto edges = scan_line_nc.flatnonzero();
+	  if (edges.size() >= 2) {
+	    if (side != 2) {
+	      mx = edges[side];
+	    } else {
+	      mx = (int)((edges[0]+edges[1]) / 2);
+	    }
+	  } else if (edges.size() == 1) {
+	    mx = edges[0];
+	  }
+	}
+
+	/* calculate variance of mx from the center in pixel */
+	int vxp = mx - (int)(FRAME_WIDTH/2);
+	/* convert the variance from pixel to milimeters
+	   72 is length of the closest horizontal line on ground within the camera vision */
+	float vxm = vxp * 72 / 640;
+	/* calculate the rotation in degree (z-axis)
+	   284 is distance from axle to the closest horizontal line on ground the camera can see */
+	float theta = 180 * atan(vxm / 284) / M_PI;
+	_log("mx = %d, vxm = %d, theta = %d", mx, (int)vxm, (int)theta);
+	
+        int8_t backward, turn, pwmL, pwmR;
+
+        /* compute necessary amount of steering by PID control */
+        turn = (-1) * _COURSE * ltPid->compute(theta, 0); /* 0 is the center */
+        backward = -speed;
+        /* steer EV3 by setting different speed to the motors */
+        pwmL = backward - turn;
+        pwmR = backward + turn;
+        srlfL->setRate(srewRate);
+        //leftMotor->setPWM(pwmL);
+        srlfR->setRate(srewRate);
+        //rightMotor->setPWM(pwmR);
+        return Status::Running;
+    }
+protected:
+    int speed, gsmin, gsmax, mx;
+    PIDcalculator* ltPid;
+    double srewRate;
+    TraceSide side;
+    Rect roi;
+    Mat kernel;
+    bool updated;
+};
+
+/*
+    usage:
     ".leaf<TraceLine>(speed, target, p, i, d, srew_rate, trace_side)"
     is to instruct the robot to trace the line at the given speed.
     p, i, d are constants for PID control.
@@ -543,6 +726,11 @@ void main_task(intptr_t unused) {
     // temp fix 2022/6/20 W.Taniguchi, as Bluetooth not implemented yet
     //bt = ev3_serial_open_file(EV3_SERIAL_BT);
     //assert(bt != NULL);
+    cap = VideoCapture(0);
+    cap.set(CAP_PROP_FRAME_WIDTH, FRAME_WIDTH);
+    cap.set(CAP_PROP_FRAME_HEIGHT, FRAME_HEIGHT);
+    cap.set(CAP_PROP_FPS, 90);
+    assert(cap.isOpened() == true);    
     /* create and initialize EV3 objects */
     ev3clock    = new Clock();
     touchSensor = new TouchSensor(PORT_1);
@@ -610,44 +798,44 @@ void main_task(intptr_t unused) {
 
     /* BEHAVIOR FOR THE RIGHT COURSE STARTS HERE */
     if (prof->getValueAsStr("COURSE") == "R") {
-      tr_run = nullptr;
+      tr_run = (BrainTree::BehaviorTree*) BrainTree::Builder()
+        .composite<BrainTree::ParallelSequence>(1,2)
+          .leaf<IsTimeEarned>(30000000) /* count 30 seconds */
+          .leaf<TraceLine>(SPEED_NORM, GS_TARGET, P_CONST, I_CONST, D_CONST, 0.0, TS_NORMAL)
+        .end()
+        .build();
+    
       tr_block = nullptr;
-
     } else { /* BEHAVIOR FOR THE LEFT COURSE STARTS HERE */
       tr_run = (BrainTree::BehaviorTree*) BrainTree::Builder()
         .composite<BrainTree::ParallelSequence>(1,3)
-            .leaf<IsBackOn>()
-            /*
-            ToDo: earned distance is not calculated properly parhaps because the task is NOT invoked every 10ms as defined in app.h on RasPike.
-              Identify a realistic PERIOD_UPD_TSK.  It also impacts PID calculation.
-            */
-            .leaf<IsDistanceEarned>(1000)
-            .composite<BrainTree::MemSequence>()
-                .leaf<IsColorDetected>(CL_BLACK)
-                .leaf<IsColorDetected>(CL_BLUE)
-            .end()
-            .leaf<TraceLine>(SPEED_NORM, GS_TARGET, P_CONST, I_CONST, D_CONST, 0.0, TS_NORMAL)
+          .leaf<IsBackOn>()
+          .leaf<IsDistanceEarned>(1000)
+          .composite<BrainTree::MemSequence>()
+            .leaf<IsColorDetected>(CL_BLACK)
+            .leaf<IsColorDetected>(CL_BLUE)
+        .end()
+        .leaf<TraceLineCam>(35, 0.1, 0.39, D_CONST, 0, 100, 0.0, TS_NORMAL)
+        /* P=0.75, I=0.39, D=0.08 */
         .end()
         .build();
 
       tr_block = (BrainTree::BehaviorTree*) BrainTree::Builder()
         .composite<BrainTree::MemSequence>()
-            .leaf<StopNow>()
-            .leaf<IsTimeEarned>(3000000) // wait 3 seconds
-            .composite<BrainTree::ParallelSequence>(1,3)
-                .leaf<IsTimeEarned>(10000000) // break after 10 seconds
-                .leaf<RunAsInstructed>(-50,-25,0.5)
-            .end()
-            .leaf<StopNow>()
+          .leaf<StopNow>()
+          .leaf<IsTimeEarned>(3000000) // wait 3 seconds
+          .leaf<TraceLine>(SPEED_NORM, GS_TARGET, P_CONST, I_CONST, D_CONST, 0.0, TS_NORMAL)
+          .leaf<StopNow>()
         .end()
         .build();
-
     } /* if (prof->getValueAsStr("COURSE") == "R") */
 
 /*
     === BEHAVIOR TREE DEFINITION ENDS HERE ===
 */
 
+    /* prepare a frame for the first frame */
+    cap.read(frame);
     /* register cyclic handler to EV3RT */
     sta_cyc(CYC_UPD_TSK);
 
@@ -656,13 +844,27 @@ void main_task(intptr_t unused) {
     ev3_led_set_color(LED_ORANGE);
     state = ST_CALIBRATION;
 
-    /* the main task sleep until being waken up and let the registered cyclic handler to traverse the behavir trees */
-    _log("going to sleep...");
-    ER ercd = slp_tsk();
-    assert(ercd == E_OK);
-    if (ercd != E_OK) {
-        syslog(LOG_NOTICE, "slp_tsk() returned %d", ercd);
+    /* process video frames until the state gets changed */
+    while (state != ST_END) {
+      ER ercd = tloc_mtx(MTX1, 1000U); // test and lock the mutex
+      if (ercd == E_OK) { // if successfully locked, read a frame and unlock the mutex; otherwise, do nothing
+        cap.read(frame);
+	ercd = unl_mtx(MTX1);
+	assert(ercd == E_OK);
+      } else {
+	_log("mutex lock failed with %d", ercd);
+	assert(ercd == E_TMOUT);
+      }
+      ev3clock->sleep(10000); // sleep 10 msec
     }
+
+    /* the main task sleep until being waken up and let the registered cyclic handler to traverse the behavir trees */
+    //_log("going to sleep...");
+    //ER ercd = slp_tsk();
+    //assert(ercd == E_OK);
+    //if (ercd != E_OK) {
+    //    syslog(LOG_NOTICE, "slp_tsk() returned %d", ercd);
+    //}
 
     /* deregister cyclic handler from EV3RT */
     stp_cyc(CYC_UPD_TSK);
@@ -685,7 +887,8 @@ void main_task(intptr_t unused) {
     delete sonarSensor;
     delete touchSensor;
     delete ev3clock;
-    _log("being terminated...");
+    cap.release();
+     _log("being terminated...");
     // temp fix 2022/6/20 W.Taniguchi, as Bluetooth not implemented yet
     //fclose(bt);
 #if defined(MAKE_SIM)    
