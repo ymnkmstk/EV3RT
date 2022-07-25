@@ -73,63 +73,6 @@ extern Plotter*     plotter;
 #define STR(var) #var
 
 #if defined(MAKE_SIM)
-#include "etroboc_ext.h"
-#endif
-
-/* M_PI and M_TWOPI is NOT available even with math header file under -std=c++11
-   because they are not strictly comforming to C++11 standards
-   this program is compiled under -std=gnu++11 option */
-#include <math.h>
-
-#include "FilteredMotor.hpp"
-#include "SRLF.hpp"
-#include "FilteredColorSensor.hpp"
-#include "FIR.hpp"
-#include "Plotter.hpp"
-#include "PIDcalculator.hpp"
-
-/* global variables */
-extern FILE*        bt;
-extern Clock*       ev3clock;
-extern TouchSensor* touchSensor;
-extern SonarSensor* sonarSensor;
-extern FilteredColorSensor* colorSensor;
-extern GyroSensor*  gyroSensor;
-extern SRLF*        srlf_l;
-extern FilteredMotor*       leftMotor;
-extern SRLF*        srlf_r;
-extern FilteredMotor*       rightMotor;
-extern Motor*       armMotor;
-extern Plotter*     plotter;
-
-#define DEBUG
-
-#ifdef DEBUG
-#define _debug(x) (x)
-#else
-#define _debug(x)
-#endif
-
-//#define LOG_ON_CONSOL
-
-/* ##__VA_ARGS__ is gcc proprietary extention.
-   this is also where -std=gnu++11 option is necessary */
-#ifdef LOG_ON_CONSOL
-#define _log(fmt, ...) \
-    syslog(LOG_NOTICE, "%08u, %s: " fmt, \
-    ev3clock->now(), __PRETTY_FUNCTION__, ##__VA_ARGS__)
-#else
-#define _log(fmt, ...) \
-    printf("%08u, %s: " fmt "\n", \
-    ev3clock->now(), __PRETTY_FUNCTION__, ##__VA_ARGS__)
-    // temp fix 2022/6/20 W.Taniguchi, as Bluetooth not implemented yet
-    /* fprintf(bt, "%08u, %s: " fmt "\n", \ */
-#endif
-
-/* macro to covert an enumeration constant to a string */
-#define STR(var) #var
-
-#if defined(MAKE_SIM)
   /* macro for making program compatible for both left and right courses.
    the default is left course. */ 
   #if defined(MAKE_RIGHT)
