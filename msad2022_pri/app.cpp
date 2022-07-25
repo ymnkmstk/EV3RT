@@ -33,13 +33,11 @@ FilteredMotor*  rightMotor;
 Motor*          armMotor;
 Plotter*        plotter;
 
-//NEW
 int32_t slalomPattern = 0;
 int32_t* ptrSlalomPattern = &slalomPattern;
 
 BrainTree::BehaviorTree* tr_calibration = nullptr;
 BrainTree::BehaviorTree* tr_run         = nullptr;
-//BrainTree::BehaviorTree* tr_slalom      = nullptr;
 BrainTree::BehaviorTree* tr_slalom_first      = nullptr;
 BrainTree::BehaviorTree* tr_slalom_check      = nullptr;
 BrainTree::BehaviorTree* tr_slalom_second_a      = nullptr;
@@ -150,17 +148,11 @@ public:
     Status update() override {
         distance = 10 * (sonarSensor->getDistance());
         _log("sonar alert at %d", distance);
-//        if ((distance <= alertDistance) && (distance >= 0)) {
-//            _log("sonar alert at %d", distance);
-//            return Status::Success;
-//        } else {
         if (0 < distance && distance <= 250) {
-            //state = ST_SLALOM_SECOND_A;
-            *ptrSlalomPattern = 1;
+            *ptrSlalomPattern = 1;  //go to pattern A
             return Status::Success;
         } else if (300 < distance && distance < 400) {
-            //state = ST_SLALOM_SECOND_B;
-            *ptrSlalomPattern = 2;
+            *ptrSlalomPattern = 2;  //go to pattern B
             return Status::Success;
         } else {
             return Status::Running;
@@ -712,34 +704,35 @@ app.h on RasPike.
         .composite<BrainTree::ParallelSequence>(1,2)
             .leaf<IsBackOn>()
             .composite<BrainTree::MemSequence>()
- //               .leaf<RotateEV3>(-90, 50, 0.0)
-                //back
+                //move back
                 .composite<BrainTree::ParallelSequence>(1,2)
                     .leaf<IsTimeEarned>(550000)
                     .leaf<RunAsInstructed>(-40, -40, 0.0)
                 .end()
-                //leftback
+                //rotate left with left wheel
                 .composite<BrainTree::ParallelSequence>(1,2)
                     .leaf<IsTimeEarned>(500000)
                     .leaf<RunAsInstructed>(-40, 0, 0.0)
                 .end()
-                //foward
+                //move foward
                 .composite<BrainTree::ParallelSequence>(1,2)
                     .leaf<IsTimeEarned>(350000)
                     .leaf<RunAsInstructed>(50, 50, 0.0)
                 .end()
-                //turn
+                //turn left with right wheel
                 .composite<BrainTree::ParallelSequence>(1,2)
                     .leaf<IsTimeEarned>(820000)
                     .leaf<RunAsInstructed>(0, 50, 0.0)
                 .end()
-                //sonarcheck
+                //get the distance between robot and plastic bottle using ultrasonic sensor
+                //judge the arrangement pattern of plastic bottles from the distance
+                //rotate left until sensor gets distance or 2 seconds pass
                 .composite<BrainTree::MemSequence>()
                     .leaf<StopNow>()
                     .composite<BrainTree::ParallelSequence>(1,2)
                         .leaf<IsTimeEarned>(2000000)
                         .leaf<SonarTestForSlalom>(1)
-                        .leaf<RunAsInstructed>(35, 0, 0.0)  //turn & sonar check
+                        .leaf<RunAsInstructed>(35, 0, 0.0)
                     .end()
                 .end()
             .end()
@@ -766,7 +759,6 @@ app.h on RasPike.
             .leaf<IsTimeEarned>(100000) // wait 0.1 seconds
             .composite<BrainTree::ParallelSequence>(1,3)
                 .leaf<IsTimeEarned>(100000) // break after 0.1 seconds
-//                .leaf<RunAsInstructed>(-50,-25,0.5)
                 .leaf<RunAsInstructed>(0,0,0.0)
             .end()
             .leaf<StopNow>()
@@ -933,7 +925,7 @@ void update_task(intptr_t unused) {
                     _log("State changed: ST_SLALOM_CHECK to ST_SLALOM_SECOND_B");
                 } else {
                     _log("failed to check slalom pattern");
-                    _log("choosed slalom pattern A");
+                    _log("chose slalom pattern A");
                     state = ST_SLALOM_SECOND_A;
                     _log("State changed: ST_SLALOM_CHECK to ST_SLALOM_SECOND_A");
                 }
