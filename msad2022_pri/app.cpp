@@ -393,11 +393,11 @@ public:
 	cvtColor(img_orig, img_gray, COLOR_BGR2GRAY);
 	unl_cpu(); /* enable interrupts */
 	/* mask the upper half of the grayscale image */
-	for (int i = 0; i < (int)(FRAME_HEIGHT/2); i++) {
-	  for (int j = 0; j < FRAME_WIDTH; j++) {
-	    img_gray.at<uchar>(i,j) = 255; /* type = CV_8U */
-	  }
-	}
+	//for (int i = 0; i < (int)(FRAME_HEIGHT/2); i++) {
+	//  for (int j = 0; j < FRAME_WIDTH; j++) {
+	//    img_gray.at<uchar>(i,j) = 255; /* type = CV_8U */
+	//  }
+	//}
 	/* binarize the image */
 	inRange(img_gray, gsmin, gsmax, img_bin);
 	/* remove noise */
@@ -415,7 +415,7 @@ public:
 	if (contours.size() >= 1) {
 	  int i_area_max = 0;
 	  double area_max = 0.0;
-	  for (int i = 0; i < contours.size(); i++) {
+	  for (int i = 0; i < (int)contours.size(); i++) {
 	    double area = contourArea(contours[i]);
 	    if (area > area_max) {
 	      area_max = area;
@@ -477,7 +477,7 @@ public:
 	/* calculate the rotation in degree (z-axis)
 	   284 is distance from axle to the closest horizontal line on ground the camera can see */
 	float theta = 180 * atan(vxm / 284) / M_PI;
-	_log("mx = %d, vxm = %d, theta = %d", mx, (int)vxm, (int)theta);
+	//_log("mx = %d, vxm = %d, theta = %d", mx, (int)vxm, (int)theta);
 	
         int8_t backward, turn, pwmL, pwmR;
 
@@ -488,9 +488,9 @@ public:
         pwmL = backward - turn;
         pwmR = backward + turn;
         srlfL->setRate(srewRate);
-        //leftMotor->setPWM(pwmL);
+        leftMotor->setPWM(pwmL);
         srlfR->setRate(srewRate);
-        //rightMotor->setPWM(pwmR);
+        rightMotor->setPWM(pwmR);
         return Status::Running;
     }
 protected:
@@ -790,7 +790,7 @@ void main_task(intptr_t unused) {
     tr_run = (BrainTree::BehaviorTree*) BrainTree::Builder()
       .composite<BrainTree::ParallelSequence>(1,2)
         .leaf<IsTimeEarned>(30000000) /* count 30 seconds */
-        .leaf<TraceLine>(SPEED_NORM, GS_TARGET, P_CONST, I_CONST, D_CONST, 0.0, TS_NORMAL)
+        .leaf<TraceLine>(SPEED_NORM, GS_TARGET, P_CONST, I_CONST, D_CONST, 0.0, TS_OPPOSITE)
       .end()
       .build();
     
@@ -804,19 +804,18 @@ void main_task(intptr_t unused) {
         .composite<BrainTree::MemSequence>()
           .leaf<IsColorDetected>(CL_BLACK)
           .leaf<IsColorDetected>(CL_BLUE)
-      .end()
-      .leaf<TraceLineCam>(35, 0.1, 0.39, D_CONST, 0, 100, 0.0, TS_NORMAL)
-      /* P=0.75, I=0.39, D=0.08 */
+        .end()
+        .leaf<TraceLineCam>(35, 3.9, 0.00, 0.035, 0, 100, 0.0, TS_NORMAL)
+        /* P=0.75, I=0.39, D=0.08 */
+        /* S=50, P=4.75, I=0.85, D=0.04 */
+        /* S=50, P=4.75, I=0.83, D=0.041 */
+        /* S=50, P=4.75, I=0.83, D=0.044 */
+        /* S=35, P=3.9, I=0.0, D=0.05 */
       .end()
       .build();
 
     tr_block = (BrainTree::BehaviorTree*) BrainTree::Builder()
-      .composite<BrainTree::MemSequence>()
-        .leaf<StopNow>()
-        .leaf<IsTimeEarned>(3000000) // wait 3 seconds
-        .leaf<TraceLine>(SPEED_NORM, GS_TARGET, P_CONST, I_CONST, D_CONST, 0.0, TS_NORMAL)
-        .leaf<StopNow>()
-      .end()
+      .leaf<StopNow>()
       .build();
 
 #endif /* if defined(MAKE_RIGHT) */
@@ -837,13 +836,15 @@ void main_task(intptr_t unused) {
 
     /* process video frames until the state gets changed */
     while (state != ST_END) {
-      ER ercd = tloc_mtx(MTX1, 1000U); // test and lock the mutex
-      if (ercd == E_OK) { // if successfully locked, read a frame and unlock the mutex; otherwise, do nothing
+      ER ercd = tloc_mtx(MTX1, 1000U); /* test and lock the mutex  */
+      if (ercd == E_OK) { /* if successfully locked, read a frame and unlock the mutex; otherwise, do nothing */
         cap.read(frame);
 	ercd = unl_mtx(MTX1);
 	assert(ercd == E_OK);
       } else {
-	_log("mutex lock failed with %d", ercd);
+	if (ercd != -50) {
+	  _log("mutex lock failed with %d", ercd);
+	}
 	assert(ercd == E_TMOUT);
       }
       ev3clock->sleep(10000); // sleep 10 msec
