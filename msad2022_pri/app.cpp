@@ -556,8 +556,12 @@ void main_task(intptr_t unused) {
     plotter     = new Plotter(leftMotor, rightMotor, gyroSensor);
     /* read profile file and make the profile object ready */
     prof        = new Profile("msad2022_pri/profile.txt");
-    std::cout << "CAM_D_CONST = " << prof->getValueAsNum("CAM_D_CONST") << std::endl;
-    std::cout << "NOT_EXIST = " << prof->getValueAsNum("NOT_EXIST") << std::endl;
+    /* determine the course L or R */
+    if (prof->getValueAsStr("COURSE") == "R") {
+      _COURSE = -1;
+    } else {
+      _COURSE = 1;
+    }
  
     /* FIR parameters for a low-pass filter with normalized cut-off frequency of 0.2
         using a function of the Hamming Window */
@@ -599,17 +603,18 @@ void main_task(intptr_t unused) {
     DEFINE ROBOT BEHAVIOR AFTER START
     FOR THE RIGHT AND LEFT COURSE SEPARATELY
 
-    #if defined(MAKE_RIGHT)
-    #else
-    #endif
+    if (prof->getValueAsStr("COURSE") == "R") {
+    } else {
+    }
 */ 
 
-#if defined(MAKE_RIGHT) /* BEHAVIOR FOR THE RIGHT COURSE STARTS HERE */
-    tr_run = nullptr;
-    tr_block = nullptr;
+    /* BEHAVIOR FOR THE RIGHT COURSE STARTS HERE */
+    if (prof->getValueAsStr("COURSE") == "R") {
+      tr_run = nullptr;
+      tr_block = nullptr;
 
-#else /* BEHAVIOR FOR THE LEFT COURSE STARTS HERE */
-    tr_run = (BrainTree::BehaviorTree*) BrainTree::Builder()
+    } else { /* BEHAVIOR FOR THE LEFT COURSE STARTS HERE */
+      tr_run = (BrainTree::BehaviorTree*) BrainTree::Builder()
         .composite<BrainTree::ParallelSequence>(1,3)
             .leaf<IsBackOn>()
             /*
@@ -625,7 +630,7 @@ void main_task(intptr_t unused) {
         .end()
         .build();
 
-    tr_block = (BrainTree::BehaviorTree*) BrainTree::Builder()
+      tr_block = (BrainTree::BehaviorTree*) BrainTree::Builder()
         .composite<BrainTree::MemSequence>()
             .leaf<StopNow>()
             .leaf<IsTimeEarned>(3000000) // wait 3 seconds
@@ -637,7 +642,7 @@ void main_task(intptr_t unused) {
         .end()
         .build();
 
-#endif /* if defined(MAKE_RIGHT) */
+    } /* if (prof->getValueAsStr("COURSE") == "R") */
 
 /*
     === BEHAVIOR TREE DEFINITION ENDS HERE ===
