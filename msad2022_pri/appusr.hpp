@@ -121,6 +121,7 @@ enum Color {
     CL_GREEN,
     CL_GRAY,
     CL_WHITE,
+    CL_BLUE_SL,
 };
 
 enum BoardItem {

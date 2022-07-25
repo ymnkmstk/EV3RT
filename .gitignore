@@ -10,7 +10,10 @@
 !/msad2022_ent/
 /msad2022_ent/work/
 !/msad2022_pri/
-!/msad2022_pri/work/
+/msad2022_pri/prototyping/*
+!/msad2022_pri/prototyping/*.py
+!/msad2022_pri/prototyping/*.cpp
+/msad2022_pri/work/
 !/test-sensor/
 !/ev3way-cpp/
 !/sample_cpp5/
