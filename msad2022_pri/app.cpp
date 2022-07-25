@@ -12,6 +12,7 @@ using namespace cv;
   the use of NumCpp requires -std=c++14 for compilation
 */
 #include "NumCpp.hpp"
+#include "Profile.hpp"
 /*
     BrainTree.h, opencv.hpp and NumCpp.hpp must present
     before ev3api.h on RasPike environment.
@@ -34,6 +35,7 @@ extern "C" void __sync_synchronize() {}
 
 /* global variables */
 FILE*           bt;
+Profile*        prof;
 VideoCapture    cap;
 Mat             frame;
 Clock*          ev3clock;
@@ -721,8 +723,8 @@ void task_activator(intptr_t tskid) {
 
 /* The main task */
 void main_task(intptr_t unused) {
-    bt = ev3_serial_open_file(EV3_SERIAL_BT);
     // temp fix 2022/6/20 W.Taniguchi, as Bluetooth not implemented yet
+    //bt = ev3_serial_open_file(EV3_SERIAL_BT);
     //assert(bt != NULL);
     cap = VideoCapture(0);
     cap.set(CAP_PROP_FRAME_WIDTH, FRAME_WIDTH);
@@ -740,7 +742,15 @@ void main_task(intptr_t unused) {
     rightMotor  = new FilteredMotor(PORT_B);
     armMotor    = new Motor(PORT_A);
     plotter     = new Plotter(leftMotor, rightMotor, gyroSensor);
-
+    /* read profile file and make the profile object ready */
+    prof        = new Profile("msad2022_pri/profile.txt");
+    /* determine the course L or R */
+    if (prof->getValueAsStr("COURSE") == "R") {
+      _COURSE = -1;
+    } else {
+      _COURSE = 1;
+    }
+ 
     /* FIR parameters for a low-pass filter with normalized cut-off frequency of 0.2
         using a function of the Hamming Window */
     const int FIR_ORDER = 4; 
@@ -781,44 +791,43 @@ void main_task(intptr_t unused) {
     DEFINE ROBOT BEHAVIOR AFTER START
     FOR THE RIGHT AND LEFT COURSE SEPARATELY
 
-    #if defined(MAKE_RIGHT)
-    #else
-    #endif
+    if (prof->getValueAsStr("COURSE") == "R") {
+    } else {
+    }
 */ 
 
-#if defined(MAKE_RIGHT) /* BEHAVIOR FOR THE RIGHT COURSE STARTS HERE */
-    tr_run = (BrainTree::BehaviorTree*) BrainTree::Builder()
-      .composite<BrainTree::ParallelSequence>(1,2)
-        .leaf<IsTimeEarned>(30000000) /* count 30 seconds */
-        .leaf<TraceLine>(SPEED_NORM, GS_TARGET, P_CONST, I_CONST, D_CONST, 0.0, TS_OPPOSITE)
-      .end()
-      .build();
-    
-    tr_block = nullptr;
-
-#else /* BEHAVIOR FOR THE LEFT COURSE STARTS HERE */
-    tr_run = (BrainTree::BehaviorTree*) BrainTree::Builder()
-      .composite<BrainTree::ParallelSequence>(1,3)
-        .leaf<IsBackOn>()
-        .leaf<IsDistanceEarned>(1000)
-        .composite<BrainTree::MemSequence>()
-          .leaf<IsColorDetected>(CL_BLACK)
-          .leaf<IsColorDetected>(CL_BLUE)
+    /* BEHAVIOR FOR THE RIGHT COURSE STARTS HERE */
+    if (prof->getValueAsStr("COURSE") == "R") {
+      tr_run = (BrainTree::BehaviorTree*) BrainTree::Builder()
+        .composite<BrainTree::ParallelSequence>(1,2)
+          .leaf<IsTimeEarned>(30000000) /* count 30 seconds */
+          .leaf<TraceLine>(SPEED_NORM, GS_TARGET, P_CONST, I_CONST, D_CONST, 0.0, TS_NORMAL)
         .end()
-        .leaf<TraceLineCam>(35, 3.9, 0.00, 0.035, 0, 100, 0.0, TS_NORMAL)
-        /* P=0.75, I=0.39, D=0.08 */
-        /* S=50, P=4.75, I=0.85, D=0.04 */
-        /* S=50, P=4.75, I=0.83, D=0.041 */
-        /* S=50, P=4.75, I=0.83, D=0.044 */
-        /* S=35, P=3.9, I=0.0, D=0.05 */
-      .end()
-      .build();
+        .build();
+    
+      tr_block = nullptr;
+    } else { /* BEHAVIOR FOR THE LEFT COURSE STARTS HERE */
+      tr_run = (BrainTree::BehaviorTree*) BrainTree::Builder()
+        .composite<BrainTree::ParallelSequence>(1,3)
+          .leaf<IsBackOn>()
+          .leaf<IsDistanceEarned>(1000)
+          .composite<BrainTree::MemSequence>()
+            .leaf<IsColorDetected>(CL_BLACK)
+            .leaf<IsColorDetected>(CL_BLUE)
+          .end()
+          .leaf<TraceLineCam>(35, 3.9, 0.00, 0.035, 0, 100, 0.0, TS_NORMAL)
+          /* P=0.75, I=0.39, D=0.08 */
+          /* S=50, P=4.75, I=0.85, D=0.04 */
+          /* S=50, P=4.75, I=0.83, D=0.041 */
+          /* S=50, P=4.75, I=0.83, D=0.044 */
+          /* S=35, P=3.9, I=0.0, D=0.05 */
+        .end()
+        .build();
 
-    tr_block = (BrainTree::BehaviorTree*) BrainTree::Builder()
-      .leaf<StopNow>()
-      .build();
-
-#endif /* if defined(MAKE_RIGHT) */
+      tr_block = (BrainTree::BehaviorTree*) BrainTree::Builder()
+        .leaf<StopNow>()
+        .build();
+    } /* if (prof->getValueAsStr("COURSE") == "R") */
 
 /*
     === BEHAVIOR TREE DEFINITION ENDS HERE ===
@@ -864,6 +873,8 @@ void main_task(intptr_t unused) {
     delete tr_block;
     delete tr_run;
     delete tr_calibration;
+    /* destroy profile object */
+    delete prof;
     /* destroy EV3 objects */
     delete lpf_b;
     delete lpf_g;

@@ -72,12 +72,16 @@ extern Plotter*     plotter;
 /* macro to covert an enumeration constant to a string */
 #define STR(var) #var
 
-/* macro for making program compatible for both left and right courses.
+#if defined(MAKE_SIM)
+  /* macro for making program compatible for both left and right courses.
    the default is left course. */ 
-#if defined(MAKE_RIGHT)
+  #if defined(MAKE_RIGHT)
     static const int _COURSE = -1;
-#else
+  #else
     static const int _COURSE = 1;
+  #endif /* defined(MAKE_RIGHT) */
+#else
+static int _COURSE;
 #endif
 
 /* these parameters are intended to be given as a compiler directive,
