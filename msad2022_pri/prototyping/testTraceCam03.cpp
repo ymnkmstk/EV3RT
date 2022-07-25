@@ -132,14 +132,18 @@ int main() {
       auto scan_line_nc = nc::NdArray<nc::uint8>(scan_line.data, scan_line.rows, scan_line.cols);
       auto edges = scan_line_nc.flatnonzero();
       if (edges.size() >= 2) {
-	if (edge != 2) {
-	  mx = edges[edge];
+	if (edge == 0) {
+	  mx = edges[0];
+	} else if (edge == 1) {
+	  mx = edges[edges.size()-1];
 	} else {
-	  mx = (int)((edges[0]+edges[1]) / 2);
+	  mx = (int)((edges[0]+edges[edges.size()-1]) / 2);
 	}
       } else if (edges.size() == 1) {
 	mx = edges[0];
       }
+    } else { /* contours.size() == 0 */
+      roi = Rect(0, 0, FRAME_WIDTH, FRAME_HEIGHT);
     }
 
     /* draw the area of interest on the original image */

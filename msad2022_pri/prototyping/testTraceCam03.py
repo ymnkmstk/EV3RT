@@ -98,12 +98,16 @@ while True:
         edges = np.flatnonzero(scan_line)
         # calculate the trace target using the edges
         if len(edges) >= 2:
-            if edge != 2:
-                mx = edges[edge]
+            if edge == 0:
+                mx = edges[0]
+            elif edge == 1:
+                mx = edges[len(edges)-1]
             else:
-                mx = int((edges[0]+edges[1]) / 2)
+                mx = int((edges[0]+edges[len(edges)-1]) / 2)
         elif len(edges) == 1:
             mx = edges[0]
+    else: # len(contours) == 0
+        roi = (0, 0, FRAME_WIDTH, FRAME_HEIGHT)
 
     # draw the area of interest on the original image
     x, y, w, h = roi
