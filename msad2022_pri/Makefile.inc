@@ -9,6 +9,7 @@ FilteredMotor.o \
 FilteredColorSensor.o \
 Plotter.o \
 PIDcalculator.o \
+Profile.o \
 
 SRCLANG := c++
 

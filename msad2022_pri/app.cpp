@@ -4,6 +4,7 @@
     Copyright © 2022 MSAD Mode2P. All rights reserved.
 */
 #include "BrainTree.h"
+#include "Profile.hpp"
 /*
     BrainTree.h must present before ev3api.h on RasPike environment.
     Note that ev3api.h is included by app.h.
@@ -21,6 +22,7 @@ extern "C" void __sync_synchronize() {}
 
 /* global variables */
 FILE*           bt;
+Profile*        prof;
 Clock*          ev3clock;
 TouchSensor*    touchSensor;
 SonarSensor*    sonarSensor;
@@ -538,8 +540,8 @@ void task_activator(intptr_t tskid) {
 
 /* The main task */
 void main_task(intptr_t unused) {
-    bt = ev3_serial_open_file(EV3_SERIAL_BT);
     // temp fix 2022/6/20 W.Taniguchi, as Bluetooth not implemented yet
+    //bt = ev3_serial_open_file(EV3_SERIAL_BT);
     //assert(bt != NULL);
     /* create and initialize EV3 objects */
     ev3clock    = new Clock();
@@ -552,7 +554,11 @@ void main_task(intptr_t unused) {
     rightMotor  = new FilteredMotor(PORT_B);
     armMotor    = new Motor(PORT_A);
     plotter     = new Plotter(leftMotor, rightMotor, gyroSensor);
-
+    /* read profile file and make the profile object ready */
+    prof        = new Profile("msad2022_pri/profile.txt");
+    std::cout << "CAM_D_CONST = " << prof->getValueAsNum("CAM_D_CONST") << std::endl;
+    std::cout << "NOT_EXIST = " << prof->getValueAsNum("NOT_EXIST") << std::endl;
+ 
     /* FIR parameters for a low-pass filter with normalized cut-off frequency of 0.2
         using a function of the Hamming Window */
     const int FIR_ORDER = 4; 
@@ -659,6 +665,8 @@ void main_task(intptr_t unused) {
     delete tr_block;
     delete tr_run;
     delete tr_calibration;
+    /* destroy profile object */
+    delete prof;
     /* destroy EV3 objects */
     delete lpf_b;
     delete lpf_g;
