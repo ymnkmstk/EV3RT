@@ -33,9 +33,15 @@ FilteredMotor*  rightMotor;
 Motor*          armMotor;
 Plotter*        plotter;
 
+int32_t slalomPattern = 0;
+int32_t* ptrSlalomPattern = &slalomPattern;
+
 BrainTree::BehaviorTree* tr_calibration = nullptr;
 BrainTree::BehaviorTree* tr_run         = nullptr;
-BrainTree::BehaviorTree* tr_slalom      = nullptr;
+BrainTree::BehaviorTree* tr_slalom_first      = nullptr;
+BrainTree::BehaviorTree* tr_slalom_check      = nullptr;
+BrainTree::BehaviorTree* tr_slalom_second_a      = nullptr;
+BrainTree::BehaviorTree* tr_slalom_second_b      = nullptr;
 BrainTree::BehaviorTree* tr_block       = nullptr;
 State state = ST_INITIAL;
 
@@ -129,6 +135,33 @@ public:
     }
 protected:
     int32_t alertDistance;
+};
+
+/*
+    usage:
+    ".leaf<SonarTestForSlalom>(distance)"
+    is to determine if the robot is closer than the spedi.......
+*/
+class SonarTestForSlalom : public BrainTree::Node {
+public:
+    SonarTestForSlalom(int32_t d) : alertDistance(d) {}
+    Status update() override {
+        distance = 10 * (sonarSensor->getDistance());
+        _log("sonar alert at %d", distance);
+        if (0 < distance && distance <= 250) {
+            *ptrSlalomPattern = 1;  //go to pattern A
+            return Status::Success;
+        } else if (300 < distance && distance < 400) {
+            *ptrSlalomPattern = 2;  //go to pattern B
+            return Status::Success;
+        } else {
+            return Status::Running;
+        }
+//        }
+    }
+protected:
+    int32_t alertDistance;
+    int32_t distance;
 };
 
 /*
@@ -582,7 +615,7 @@ void main_task(intptr_t unused) {
     ev3clock    = new Clock();
     touchSensor = new TouchSensor(PORT_1);
     // temp fix 2022/6/20 W.Taniguchi, new SonarSensor() blocks apparently
-    //sonarSensor = new SonarSensor(PORT_3);
+    sonarSensor = new SonarSensor(PORT_3);
     colorSensor = new FilteredColorSensor(PORT_2);
     gyroSensor  = new GyroSensor(PORT_4);
     leftMotor   = new FilteredMotor(PORT_C);
@@ -637,7 +670,10 @@ void main_task(intptr_t unused) {
 
 #if defined(MAKE_RIGHT) /* BEHAVIOR FOR THE RIGHT COURSE STARTS HERE */
     tr_run = nullptr;
-    tr_slalom = nullptr;
+    tr_slalom_first = nullptr;
+    tr_slalom_check = nullptr;
+    tr_slalom_second_a = nullptr;
+    tr_slalom_second_b = nullptr;
     tr_block = nullptr;
 
 #else /* BEHAVIOR FOR THE LEFT COURSE STARTS HERE */
@@ -649,83 +685,85 @@ void main_task(intptr_t unused) {
 app.h on RasPike.
               Identify a realistic PERIOD_UPD_TSK.  It also impacts PID calculation.
             */
-            .leaf<IsDistanceEarned>(4000)
-            .composite<BrainTree::MemSequence>()
-                .leaf<IsColorDetected>(CL_BLUE)
-            .end()
+            .leaf<IsTimeEarned>(3000000)
+//           .leaf<IsDistanceEarned>(4000)
+//            .composite<BrainTree::MemSequence>()
+//                .leaf<IsColorDetected>(CL_BLUE)
 //            .leaf<TraceLine>(SPEED_NORM, GS_TARGET, P_CONST, I_CONST, D_CONST, 0.0, TS_NORMAL)
         .end()
     .build();
 
-    tr_slalom = (BrainTree::BehaviorTree*) BrainTree::Builder()
+    tr_slalom_first = (BrainTree::BehaviorTree*) BrainTree::Builder()
+        .composite<BrainTree::ParallelSequence>(1,2)
+            .leaf<IsBackOn>()
+            .leaf<IsTimeEarned>(100000) 
+        .end()
+    .build();
+    
+    tr_slalom_check = (BrainTree::BehaviorTree*) BrainTree::Builder()
         .composite<BrainTree::ParallelSequence>(1,2)
             .leaf<IsBackOn>()
             .composite<BrainTree::MemSequence>()
+                //move back
                 .composite<BrainTree::ParallelSequence>(1,2)
-                    .leaf<IsDistanceEarned>(30)
-                    .leaf<RunAsInstructed>(70, 0, 0.0)
+                    .leaf<IsTimeEarned>(550000)
+                    .leaf<RunAsInstructed>(-40, -40, 0.0)
                 .end()
+                //rotate left with left wheel
                 .composite<BrainTree::ParallelSequence>(1,2)
-                    .leaf<IsDistanceEarned>(85)
-                    .leaf<RunAsInstructed>(0, 70, 0.0)
+                    .leaf<IsTimeEarned>(500000)
+                    .leaf<RunAsInstructed>(-40, 0, 0.0)
                 .end()
+                //move foward
                 .composite<BrainTree::ParallelSequence>(1,2)
-                    .leaf<IsDistanceEarned>(280)
-                    .leaf<RunAsInstructed>(50, 20, 0.0)
+                    .leaf<IsTimeEarned>(350000)
+                    .leaf<RunAsInstructed>(50, 50, 0.0)
                 .end()
+                //turn left with right wheel
                 .composite<BrainTree::ParallelSequence>(1,2)
-                    .leaf<IsDistanceEarned>(280)
-                    .leaf<RunAsInstructed>(20, 60, 0.0)
+                    .leaf<IsTimeEarned>(820000)
+                    .leaf<RunAsInstructed>(0, 50, 0.0)
                 .end()
-                .composite<BrainTree::ParallelSequence>(1,2)
-                    .leaf<IsDistanceEarned>(252)
-                    .leaf<RunAsInstructed>(50, 20, 0.0)
-                .end()
-                .composite<BrainTree::ParallelSequence>(1,2)
-                    .leaf<IsDistanceEarned>(253)
-                    .leaf<RunAsInstructed>(20, 50, 0.0)
-                .end()
-                .composite<BrainTree::ParallelSequence>(1,2)
-                    .leaf<RunAsInstructed>(0, 0, 0.0)
-                .end()
-                .composite<BrainTree::ParallelSequence>(1,2)
-                    .leaf<IsDistanceEarned>(130)
-                    .leaf<RunAsInstructed>(15, 35, 0.0)
-                .end()
-                .composite<BrainTree::ParallelSequence>(1,2)
-                    .leaf<IsDistanceEarned>(250)
-                    .leaf<RunAsInstructed>(40, 20, 0.0)
-                .end()
-                .composite<BrainTree::ParallelSequence>(1,2)
-                    .leaf<IsDistanceEarned>(251)
-                    .leaf<RunAsInstructed>(20, 40, 0.0)
-                .end()
-                .composite<BrainTree::ParallelSequence>(1,2)
-                    .leaf<IsDistanceEarned>(252)
-                    .leaf<RunAsInstructed>(40, 20, 0.0)
-                .end()
-                .composite<BrainTree::ParallelSequence>(1,2)
-                    .leaf<IsDistanceEarned>(253)
-                    .leaf<RunAsInstructed>(20, 40, 0.0)
-                .end()
-                .composite<BrainTree::ParallelSequence>(1,2)
-                    .leaf<RunAsInstructed>(0, 0, 0.0)
+                //get the distance between robot and plastic bottle using ultrasonic sensor
+                //judge the arrangement pattern of plastic bottles from the distance
+                //rotate left until sensor gets distance or 2 seconds pass
+                .composite<BrainTree::MemSequence>()
+                    .leaf<StopNow>()
+                    .composite<BrainTree::ParallelSequence>(1,2)
+                        .leaf<IsTimeEarned>(2000000)
+                        .leaf<SonarTestForSlalom>(1)
+                        .leaf<RunAsInstructed>(35, 0, 0.0)
+                    .end()
                 .end()
             .end()
         .end()
-        .build();
+    .build();
+
+    tr_slalom_second_a = (BrainTree::BehaviorTree*) BrainTree::Builder()
+        .composite<BrainTree::ParallelSequence>(1,2)
+            .leaf<IsBackOn>()
+            .leaf<IsTimeEarned>(100000)  // wait 0.1 seconds
+        .end()
+    .build();
+
+    tr_slalom_second_b = (BrainTree::BehaviorTree*) BrainTree::Builder()
+        .composite<BrainTree::ParallelSequence>(1,2)
+            .leaf<IsBackOn>()
+            .leaf<IsTimeEarned>(100000) // wait 0.1 seconds
+        .end()
+    .build();
 
     tr_block = (BrainTree::BehaviorTree*) BrainTree::Builder()
         .composite<BrainTree::MemSequence>()
             .leaf<StopNow>()
-            .leaf<IsTimeEarned>(3000000) // wait 3 seconds
+            .leaf<IsTimeEarned>(100000) // wait 0.1 seconds
             .composite<BrainTree::ParallelSequence>(1,3)
-                .leaf<IsTimeEarned>(10000000) // break after 10 seconds
-                .leaf<RunAsInstructed>(-50,-25,0.5)
+                .leaf<IsTimeEarned>(100000) // break after 0.1 seconds
+                .leaf<RunAsInstructed>(0,0,0.0)
             .end()
             .leaf<StopNow>()
         .end()
-        .build();
+    .build();
 
 #endif /* if defined(MAKE_RIGHT) */
 
@@ -754,7 +792,10 @@ app.h on RasPike.
     /* destroy behavior tree */
     delete tr_block;
     delete tr_run;
-    delete tr_slalom;
+    delete tr_slalom_first;
+    delete tr_slalom_check;
+    delete tr_slalom_second_a;
+    delete tr_slalom_second_b;
     delete tr_calibration;
     /* destroy EV3 objects */
     delete lpf_b;
@@ -803,10 +844,22 @@ void update_task(intptr_t unused) {
             case BrainTree::Node::Status::Success:
                 switch (JUMP) { /* JUMP = 1... is for testing only */
                     case 1:
-                        state = ST_SLALOM;
-                        _log("State changed: ST_CALIBRATION to ST_SLALOM");
+                        state = ST_SLALOM_FIRST;
+                        _log("State changed: ST_CALIBRATION to ST_SLALOM_FIRST");
                         break;
                     case 2:
+                        state = ST_SLALOM_CHECK;
+                        _log("State changed: ST_CALIBRATION to ST_SLALOM_CHECK");
+                        break;
+                    case 3:
+                        state = ST_SLALOM_SECOND_A;
+                        _log("State changed: ST_CALIBRATION to ST_SLALOM_SECOND_A");
+                        break;
+                    case 4:
+                        state = ST_SLALOM_SECOND_B;
+                        _log("State changed: ST_CALIBRATION to ST_SLALOM_SECOND_B");
+                        break;
+                    case 5:
                         state = ST_BLOCK;
                         _log("State changed: ST_CALIBRATION to ST_BLOCK");
                         break;
@@ -830,8 +883,8 @@ void update_task(intptr_t unused) {
             status = tr_run->update();
             switch (status) {
             case BrainTree::Node::Status::Success:
-                state = ST_SLALOM;
-                _log("State changed: ST_RUN to ST_SLALOM");
+                state = ST_SLALOM_FIRST;
+                _log("State changed: ST_RUN to ST_SLALOM_FIRST"); //CHANGE
                 break;
             case BrainTree::Node::Status::Failure:
                 state = ST_ENDING;
@@ -842,17 +895,78 @@ void update_task(intptr_t unused) {
             }
         }
         break;
-    case ST_SLALOM:
-        if (tr_slalom != nullptr) {
-            status = tr_slalom->update();
+    case ST_SLALOM_FIRST:
+        if (tr_slalom_first != nullptr) {
+            status = tr_slalom_first->update();
             switch (status) {
             case BrainTree::Node::Status::Success:
-                state = ST_BLOCK;
-                _log("State changed: ST_SLALOM to ST_BLOCK");
+                state = ST_SLALOM_CHECK;
+                _log("State changed: ST_SLALOM_FIRST to ST_SLALOM_CHECK");
                 break;
             case BrainTree::Node::Status::Failure:
                 state = ST_ENDING;
-                _log("State changed: ST_SLALOM to ST_ENDING");
+                _log("State changed: ST_SLALOM_FIRST to ST_ENDING");
+                break;
+            default:
+                break;
+            }
+        }
+        break;
+    case ST_SLALOM_CHECK:
+        if (tr_slalom_check != nullptr) {
+            status = tr_slalom_check->update();
+            switch (status) {       
+            case BrainTree::Node::Status::Success:
+                if (*ptrSlalomPattern == 1) {
+                    state = ST_SLALOM_SECOND_A;
+                    _log("State changed: ST_SLALOM_CHECK to ST_SLALOM_SECOND_A");
+                } else if (*ptrSlalomPattern == 2) {
+                    state = ST_SLALOM_SECOND_B;
+                    _log("State changed: ST_SLALOM_CHECK to ST_SLALOM_SECOND_B");
+                } else {
+                    _log("failed to check slalom pattern");
+                    _log("chose slalom pattern A");
+                    state = ST_SLALOM_SECOND_A;
+                    _log("State changed: ST_SLALOM_CHECK to ST_SLALOM_SECOND_A");
+                }
+                break;
+            case BrainTree::Node::Status::Failure:
+                state = ST_ENDING;
+                _log("State changed: ST_SLALOM_CHECK to ST_ENDING");
+                break;
+            default:
+                break;
+            }
+        }
+        break;
+        case ST_SLALOM_SECOND_A:
+        if (tr_slalom_second_a != nullptr) {
+            status = tr_slalom_second_a->update();
+            switch (status) {
+            case BrainTree::Node::Status::Success:
+                state = ST_BLOCK;
+                _log("State changed: ST_SLALOM_SECOND_A to ST_BLOCK");
+                break;
+            case BrainTree::Node::Status::Failure:
+                state = ST_ENDING;
+                _log("State changed: ST_SLALOM_SECOND_A to ST_ENDING");
+                break;
+            default:
+                break;
+            }
+        }
+        break;
+        case ST_SLALOM_SECOND_B:
+        if (tr_slalom_second_b != nullptr) {
+            status = tr_slalom_second_b->update();
+            switch (status) {
+            case BrainTree::Node::Status::Success:
+                state = ST_BLOCK;
+                _log("State changed: ST_SLALOM_SECOND_B to ST_BLOCK");
+                break;
+            case BrainTree::Node::Status::Failure:
+                state = ST_ENDING;
+                _log("State changed: ST_SLALOM_SECOND_B to ST_ENDING");
                 break;
             default:
                 break;
